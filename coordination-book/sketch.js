@@ -42,6 +42,19 @@ function useLS(key, init){
 function emptyEntry(){ return { notes: "", photo: null, moods: [] }; }
 function emojiOnly(label){ return label ? label.split(" ")[0] : ""; }
 
+
+// 페이지가 처음 열리면 data.json을 자동으로 불러오기
+React.useEffect(() => {
+  fetch('./data.json')
+    .then(res => res.json())
+    .then(data => {
+      setBook(data);
+      localStorage.setItem('coordination_simple_clean_v2', JSON.stringify(data));
+    })
+    .catch(err => console.error('data.json 불러오기 실패:', err));
+}, []);
+
+
 function App(){
   const LS_KEY = 'coordination_simple_clean_v2';
 
