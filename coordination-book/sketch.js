@@ -56,6 +56,27 @@ function App(){
     });
   };
 
+  React.useEffect(() => {
+  const saved = localStorage.getItem('coordination_simple_clean_v2');
+  if (!saved) {
+    fetch('data.json')
+      .then(response => response.json())
+      .then(data => {
+        localStorage.setItem('coordination_simple_clean_v2', JSON.stringify(data));
+        setBook(data);
+      })
+      .catch(err => console.error('data.json 불러오기 실패:', err));
+  } else {
+    try {
+      const parsed = JSON.parse(saved);
+      setBook(parsed);
+    } catch (e) {
+      console.error('저장된 데이터 파싱 실패:', e);
+    }
+  }
+}, []);
+
+
   // 🔸 데이터 백업 / 복원 기능 추가
   const exportData = () => {
     const blob = new Blob([JSON.stringify(book, null, 2)], { type: "application/json" });
