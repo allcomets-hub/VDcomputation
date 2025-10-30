@@ -70,32 +70,47 @@ function App() {
         </div>
       </header>
 
-      <div className="mt-4 grid grid-cols-7 gap-2">
-        {["월","화","수","목","금","토","일"].map(d=>(
-          <div key={d} className="text-center font-semibold text-stone-600">{d}</div>
-        ))}
-        {cells.map((date,i)=>{
-          if(!date) return <div key={i} className="h-28 bg-white rounded-2xl"/>;
-          const key = ymd(date);
-          const entry = book[key];
-          return (
-            <div key={i}
-              className="h-28 bg-white rounded-2xl p-2 shadow hover:shadow-md flex flex-col cursor-pointer"
-              onClick={()=> setOpenDay(key)}>
-              <div className="flex justify-between text-sm mb-1">
-                <span>{date.getDate()}</span>
-                <span>{entry?.photo ? "📷" : ""}</span>
-              </div>
-              <div className="flex-1 flex items-center justify-center bg-white rounded">
-                {entry?.photo ? <img src={entry.photo} className="object-cover w-full h-full"/> : null}
-              </div>
-              <div className="mt-1 flex gap-1">
-                {entry?.moods?.slice(0,3).map((m,idx)=> <span key={idx}>{emojiOnly(m)}</span>)}
-              </div>
-            </div>
-          );
-        })}
+     <div className="mt-6 grid grid-cols-7 gap-2">
+  {["월","화","수","목","금","토","일"].map(d=>(
+    <div key={d} className="text-center text-sm font-semibold text-stone-600">{d}</div>
+  ))}
+
+  {cells.map((date, i)=>{
+    if(!date) return <div key={i} className="day-cell rounded-2xl bg-white"/>;
+
+    const key = ymd(date);
+    const entry = book[key];
+
+    return (
+      <div
+        key={i}
+        className="day-cell rounded-2xl bg-white p-2 shadow hover:shadow-md cursor-pointer flex flex-col"
+        onClick={()=> setOpenDay(key)}
+      >
+        {/* 상단: 날짜/카메라 아이콘 */}
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-sm font-medium text-stone-700">{date.getDate()}</span>
+          <span className="text-xs">{ entry?.photo ? "📷" : "" }</span>
+        </div>
+
+        {/* 가운데: 썸네일 (없으면 빈 화면 유지) */}
+        <div className="thumb flex items-center justify-center overflow-hidden rounded-md bg-white">
+          { entry?.photo
+            ? <img src={entry.photo} alt="thumb" className="w-full h-full object-cover block" />
+            : null }
+        </div>
+
+        {/* 하단: 이모지 */}
+        <div className="mt-1 flex gap-1 text-base leading-none">
+          { entry?.moods?.slice(0,4).map((m,idx)=> (
+            <span key={idx}>{(m||"").split(" ")[0]}</span>
+          ))}
+        </div>
       </div>
+    );
+  })}
+</div>
+
 
       {openDay && (
         <div className="fixed inset-0 bg-black/30 flex justify-end">
