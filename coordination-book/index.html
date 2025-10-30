@@ -4,24 +4,39 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Coordination Book – Simple</title>
-    <!-- Tailwind(선택) -->
+
+    <!-- Tailwind -->
     <script src="https://cdn.tailwindcss.com"></script>
-  </head>
+
+  <head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Coordination Book – Simple</title>
+
+  <!-- ✅ Tailwind CDN 확실히 로드 -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio"></script>
+
+  <!-- ✅ 이미지 왜곡 방지 (Tailwind 안 잡힐 때 대비용 최소CSS) -->
+  <style>
+    img { max-width: 100%; height: auto; display: block; }
+    body { margin: 0; }
+  </style>
+</head>
+
   <body class="bg-stone-50">
     <div id="root" class="p-6"></div>
 
-    <!-- React + ReactDOM (UMD) -->
+    <!-- React + ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
 
-    <!-- Babel (브라우저에서 JSX/ESNext 변환) -->
-    <!-- ⚠️ data-presets="env,react" 꼭 필요 -->
+    <!-- Babel (브라우저용 JSX 변환기) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <!-- 앱 코드 -->
     <script type="text/babel" data-presets="env,react" src="./sketch.js"></script>
 
-    <!-- 렌더 -->
+    <!-- 렌더링 -->
     <script type="text/babel" data-presets="env,react">
       const root = ReactDOM.createRoot(document.getElementById('root'));
       root.render(<App />);
