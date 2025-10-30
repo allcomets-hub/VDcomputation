@@ -243,3 +243,19 @@ function DetailPanel({ day, entry, onClose, onSave, onDelete }){
     </div>
   );
 }
+// coordination-book/script.js
+
+const initialData = {
+  "2025-10-05": { emoji: "😄💖", img: "images/1005.jpg" },
+  "2025-10-07": { emoji: "💖", img: "images/1007.jpg" },
+  "2025-10-08": { emoji: "🪡", img: "images/1008.jpg" },
+  "2025-10-15": { emoji: "😴😌", img: "images/1015.jpg" },
+  "2025-10-18": { emoji: "💖", img: "images/1018.jpg" },
+  "2025-10-19": { emoji: "⚡️", img: "images/1019.jpg" },
+  "2025-10-20": { emoji: "😌", img: "images/1020.jpg" },
+  "2025-10-23": { emoji: "😌", img: "images/1023.jpg" },
+  "2025-10-24": { emoji: "", img: "images/1024.jpg" },
+};
+window.addEventListener("DOMContentLoaded", () => {
+  loadData(initialData);
+});
