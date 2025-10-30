@@ -1,36 +1,438 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Coordination Book – Dahye Jung</title>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Coordination Book</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    .day-cell { height: 180px; }
-    .thumb { height: 120px; }
-    @media (min-width: 768px) {
-      .day-cell { height: 200px; }
-      .thumb { height: 140px; }
-    }
+    body { background:#f9f9f9; font-family: system-ui, sans-serif; }
+    .day-cell { height:200px; }
+    .thumb    { height:120px; }
+    .sw-mini  { width:16px; height:16px; border:1px solid rgba(0,0,0,.1); border-radius:3px; overflow:hidden; }
+    @media(min-width:768px){ .day-cell{height:220px}.thumb{height:140px} }
   </style>
 </head>
-<body class="bg-stone-50">
+<body>
   <div id="root" class="p-6"></div>
 
-  <!-- React -->
+  <!-- React + Babel -->
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-
-  <!-- Babel -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- 앱 -->
-  <script type="text/babel" data-presets="env,react" src="./sketch.js?v=final"></script>
+  <!-- 분석용 캔버스(숨김) -->
+  <canvas id="work" width="220" height="220" style="display:none"></canvas>
 
-  <!-- 렌더 -->
+  <!-- ================= 앱 코드 ================= -->
   <script type="text/babel" data-presets="env,react">
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
+  /* ===== 기본 유틸 ===== */
+  const pad = n => String(n).padStart(2,'0');
+  const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const range = n => Array.from({length:n},(_,i)=>i);
+  const $work = () => document.getElementById('work');
+
+  function monthGrid(year,month){
+    const first=new Date(year,month-1,1);
+    const start=(first.getDay()+6)%7;
+    const days=new Date(year,month,0).getDate();
+    const cells=[];
+    range(start).forEach(()=>cells.push(null));
+    range(days).forEach(i=>cells.push(new Date(year,month-1,i+1)));
+    while(cells.length%7!==0) cells.push(null);
+    return cells;
+  }
+  function useLS(key,init){
+    const [v,setV]=React.useState(()=>{try{
+      const raw=localStorage.getItem(key);
+      return raw?JSON.parse(raw):init;
+    }catch{return init}});
+    React.useEffect(()=>localStorage.setItem(key,JSON.stringify(v)),[key,v]);
+    return [v,setV];
+  }
+  function emptyEntry(){
+    return{
+      notes:"", photo:null, moods:[],
+      // 스와치 관련
+      palette:null, matType:"auto", strength:60, swatchSVG:null
+    };
+  }
+  const emojiOnly=s=>s?s.split(" ")[0]:"";
+
+  /* ===== 색/팔레트 & 소재 추정 ===== */
+  const lighten=(hex,amt=.2)=>{const n=parseInt(hex.slice(1),16);let r=(n>>16)&255,g=(n>>8)&255,b=n&255;r=Math.round(r+(255-r)*amt);g=Math.round(g+(255-g)*amt);b=Math.round(b+(255-b)*amt);return "#"+[r,g,b].map(x=>x.toString(16).padStart(2,"0")).join("")};
+  const shade=(hex,amt=.2)=>{const n=parseInt(hex.slice(1),16);let r=(n>>16)&255,g=(n>>8)&255,b=n&255;r=Math.round(r*(1-amt));g=Math.round(g*(1-amt));b=Math.round(b*(1-amt));return "#"+[r,g,b].map(x=>x.toString(16).padStart(2,"0")).join("")};
+
+  function hexOf({r,g,b}){return "#"+[r,g,b].map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,"0")).join("")}
+  function dist(a,b){return Math.hypot(a.r-b.r,a.g-b.g,a.b-b.b)}
+  function avg(list){const s=list.reduce((p,c)=>({r:p.r+c.r,g:p.g+c.g,b:p.b+c.b}),{r:0,g:0,b:0});const n=list.length||1;return{r:s.r/n,g:s.g/n,b:s.b/n};}
+
+  function quantizeColorsFromImg(img, n=4){
+    const c=$work(), ctx=c.getContext('2d',{willReadFrequently:true});
+    const S=200; c.width=S; c.height=S; ctx.drawImage(img,0,0,S,S);
+    const d=ctx.getImageData(0,0,S,S).data;
+    const pts=[];
+    for(let i=0;i<d.length;i+=16){ // 다운샘플
+      if(d[i+3]<8) continue;
+      pts.push({r:d[i],g:d[i+1],b:d[i+2]});
+    }
+    const by=[...pts].sort((a,b)=>(a.r+a.g+a.b)-(b.r+b.g+b.b));
+    const centers=[];
+    for(let i=0;i<n;i++) centers.push({...by[Math.floor(by.length*(i+0.5)/n)]});
+    for(let it=0; it<10; it++){
+      const buckets=Array.from({length:n},()=>[]);
+      for(const p of pts){
+        let bi=0,best=1e9;
+        for(let k=0;k<n;k++){ const dd=dist(p,centers[k]); if(dd<best){best=dd;bi=k;} }
+        buckets[bi].push(p);
+      }
+      for(let k=0;k<n;k++){ if(buckets[k].length) centers[k]=avg(buckets[k]); }
+    }
+    return centers.map(hexOf);
+  }
+
+  function channelVarianceOf(img){
+    const c=$work(), ctx=c.getContext('2d',{willReadFrequently:true});
+    const S=140; c.width=S; c.height=S; ctx.drawImage(img,0,0,S,S);
+    const d=ctx.getImageData(0,0,S,S).data;
+    let sr=0,sg=0,sb=0,n=0;
+    for(let i=0;i<d.length;i+=4){sr+=d[i];sg+=d[i+1];sb+=d[i+2];n++;}
+    const mr=sr/n,mg=sg/n,mb=sb/n; let v=0;
+    for(let i=0;i<d.length;i+=4){ v+=(d[i]-mr)**2+(d[i+1]-mg)**2+(d[i+2]-mb)**2; }
+    return v/n;
+  }
+  function guessMaterialFromImg(img){
+    const c=$work(), ctx=c.getContext('2d',{willReadFrequently:true});
+    const S=160; c.width=S; c.height=S; ctx.drawImage(img,0,0,S,S);
+    const id=ctx.getImageData(0,0,S,S); const d=id.data;
+    let sx=0,sy=0,edges=0,n=0;
+    const L=(x,y)=>{const i=(y*S+x)*4; return 0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];};
+    for(let y=1;y<S-1;y++){
+      for(let x=1;x<S-1;x++){
+        const Gx=(L(x+1,y-1)+2*L(x+1,y)+L(x+1,y+1))-(L(x-1,y-1)+2*L(x-1,y)+L(x-1,y+1));
+        const Gy=(L(x-1,y+1)+2*L(x,y+1)+L(x+1,y+1))-(L(x-1,y-1)+2*L(x,y-1)+L(x+1,y-1));
+        const m=Math.hypot(Gx,Gy);
+        if(m>60){edges++;sx+=Gx;sy+=Gy;}
+        n++;
+      }
+    }
+    const edgeRatio=edges/n; const deg=Math.abs(Math.atan2(sy,sx)*180/Math.PI);
+    if(edgeRatio<0.02) return "satin";
+    if(edgeRatio>0.09){
+      if(deg>30 && deg<60) return "twill";
+      if(deg<15 || deg>75) return "rib";
+      return "herringbone";
+    }
+    const rough = channelVarianceOf(img);
+    return rough>1600 ? "leather" : "plain";
+  }
+
+  /* ===== 스와치 SVG 생성 ===== */
+  function swatchPlain(colors, strength){
+    const [c1=colors[0]||"#d7d7d7", c2=colors[1]||"#bdbdbd"] = colors;
+    return `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+  <defs>
+    <pattern id="weave" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="scale(${1+strength/80})">
+      <rect width="12" height="12" fill="${c1}"/>
+      <rect x="0" y="0" width="12" height="6" fill="${c2}" opacity=".25"/>
+      <rect x="0" y="0" width="6" height="12" fill="${c2}" opacity=".25"/>
+    </pattern>
+  </defs>
+  <rect width="240" height="240" fill="url(#weave)"/>
+</svg>`;
+  }
+  function swatchTwill(colors, strength){
+    const [base=colors[0]||"#6e7ea0", hi=colors[1]||"#a8b6d1"] = colors;
+    return `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+  <defs>
+    <pattern id="twill" width="16" height="16" patternUnits="userSpaceOnUse" patternTransform="rotate(45) scale(${1+strength/75})">
+      <rect width="16" height="16" fill="${base}"/>
+      <rect x="0" y="0" width="8" height="16" fill="${hi}" opacity=".18"/>
+    </pattern>
+  </defs>
+  <rect width="240" height="240" fill="url(#twill)"/>
+</svg>`;
+  }
+  function swatchRib(colors, strength){
+    const [b=colors[0]||"#c9c9c9", hi=colors[1]||"#e8e8e8"] = colors;
+    return `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+  <defs>
+    <pattern id="rib" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="scale(${1+strength/60})">
+      <rect width="10" height="10" fill="${b}"/>
+      <rect x="0" y="0" width="4" height="10" fill="${hi}" opacity=".35"/>
+    </pattern>
+  </defs>
+  <rect width="240" height="240" fill="url(#rib)"/>
+</svg>`;
+  }
+  function swatchHerringbone(colors, strength){
+    const [a=colors[0]||"#7b7b7b", b=colors[1]||"#9a9a9a"] = colors;
+    return `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+  <defs>
+    <pattern id="hb" width="24" height="24" patternUnits="userSpaceOnUse" patternTransform="scale(${1+strength/80})">
+      <path d="M0 24 L12 12 L24 24" stroke="${a}" stroke-width="6" fill="none"/>
+      <path d="M0 0 L12 12 L24 0" stroke="${b}" stroke-width="6" fill="none"/>
+    </pattern>
+  </defs>
+  <rect width="240" height="240" fill="${a}"/>
+  <rect width="240" height="240" fill="url(#hb)" opacity=".55"/>
+</svg>`;
+  }
+  function swatchSatin(colors, strength){
+    const [c=colors[0]||"#d2d2d2"]=colors;
+    return `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+  <defs>
+    <linearGradient id="sat" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"   stop-color="${c}"/>
+      <stop offset="50%"  stop-color="#ffffff" stop-opacity="${.35+strength/300}"/>
+      <stop offset="100%" stop-color="${c}"/>
+    </linearGradient>
+  </defs>
+  <rect width="240" height="240" fill="url(#sat)"/>
+</svg>`;
+  }
+  function swatchLeather(colors, strength){
+    const [c=colors[0]||"#6c4a3a"]=colors;
+    return `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+  <defs>
+    <filter id="pebble">
+      <feTurbulence type="fractalNoise" baseFrequency="${.9-strength/120}" numOctaves="2" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="${6+strength/4}" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+  <rect width="240" height="240" fill="${c}"/>
+  <rect width="240" height="240" fill="${c}" filter="url(#pebble)" opacity=".35"/>
+</svg>`;
+  }
+  function makeSwatch(type, colors, strength){
+    switch(type){
+      case "plain": return swatchPlain(colors, strength);
+      case "twill": return swatchTwill(colors, strength);
+      case "rib": return swatchRib(colors, strength);
+      case "herringbone": return swatchHerringbone(colors, strength);
+      case "satin": return swatchSatin(colors, strength);
+      case "leather": return swatchLeather(colors, strength);
+      default: return swatchPlain(colors, strength);
+    }
+  }
+
+  /* ===== 앱 ===== */
+  function App(){
+    const today=new Date();
+    const [year,setYear]=React.useState(today.getFullYear());
+    const [month,setMonth]=React.useState(today.getMonth()+1);
+    const [book,setBook]=useLS('coordination_basic_v1',{});
+    const [openDay,setOpenDay]=React.useState(null);
+    const cells=React.useMemo(()=>monthGrid(year,month),[year,month]);
+
+    const updateDay=(day,fn)=>setBook(prev=>{
+      const next={...(prev||{})};
+      const cur=prev[day]||emptyEntry();
+      next[day]=fn(cur);
+      return next;
+    });
+
+    return(
+      <div className="max-w-5xl mx-auto">
+        <header className="flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-semibold">Coordination Book</h1>
+            <p className="text-stone-600">날짜별 OOTD · 소재 스와치</p>
+          </div>
+          <div className="flex gap-2 bg-white shadow rounded-2xl p-2">
+            <button className="px-3 py-2 hover:bg-stone-100 rounded-xl"
+              onClick={()=>{if(month===1){setYear(y=>y-1);setMonth(12);}else setMonth(m=>m-1);}}>◀</button>
+            <div className="px-3 text-sm font-medium">{year} · {month}월</div>
+            <button className="px-3 py-2 hover:bg-stone-100 rounded-xl"
+              onClick={()=>{if(month===12){setYear(y=>y+1);setMonth(1);}else setMonth(m=>m+1);}}>▶</button>
+          </div>
+        </header>
+
+        <div className="mt-6 grid grid-cols-7 gap-2">
+          {["월","화","수","목","금","토","일"].map(d=>
+            <div key={d} className="text-center text-sm font-semibold text-stone-600">{d}</div>
+          )}
+
+          {cells.map((date,i)=>{
+            if(!date) return <div key={i} className="day-cell rounded-2xl bg-white"/>;
+            const key=ymd(date);
+            const entry=book[key];
+            return(
+              <div key={i}
+                   className="day-cell bg-white rounded-2xl p-2 shadow hover:shadow-md flex flex-col cursor-pointer"
+                   onClick={()=>setOpenDay(key)}>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-sm font-medium text-stone-700">{date.getDate()}</span>
+                  <span className="flex items-center gap-1 text-xs">
+                    {entry?.swatchSVG ? <>🧵<span className="sw-mini" dangerouslySetInnerHTML={{__html:entry.swatchSVG}}/></> : (entry?.photo?"📷":"")}
+                  </span>
+                </div>
+                <div className="thumb overflow-hidden rounded-md bg-stone-50 flex justify-center items-center">
+                  {entry?.photo ? <img src={entry.photo} alt="thumb" className="w-full h-full object-cover"/> : null}
+                </div>
+                <div className="mt-1 flex gap-1 text-base leading-none">
+                  {entry?.moods?.slice(0,4).map((m,idx)=><span key={idx}>{emojiOnly(m)}</span>)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {openDay && (
+          <DetailPanel
+            day={openDay}
+            entry={book[openDay]||emptyEntry()}
+            onClose={()=>setOpenDay(null)}
+            onSave={(u)=>{updateDay(openDay,()=>u);setOpenDay(null);}}
+            onDelete={()=>setBook(p=>{const n={...p};delete n[openDay];return n;})}
+            onMakeSwatch={(payload)=>{ // payload: {palette, matType, strength, swatchSVG}
+              updateDay(openDay, cur => ({...cur, ...payload}));
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+
+  /* ===== 상세 패널 ===== */
+  function DetailPanel({day,entry,onClose,onSave,onDelete,onMakeSwatch}){
+    const [local,setLocal]=React.useState(entry);
+    const [matType,setMatType]=React.useState(entry.matType||"auto");
+    const [strength,setStrength]=React.useState(entry.strength ?? 60);
+    const MOODS=["😀 기쁨","😌 차분","💖 로맨틱","⚡ 집중","✨ 영감","😴 피곤","🌞 맑음","☁️ 흐림","🌧️ 비","😡 화남"];
+    const toggleMood=m=>setLocal(prev=>{
+      const has=prev.moods.indexOf(m)>=0;
+      return {...prev,moods:has?prev.moods.filter(x=>x!==m):[...prev.moods,m]};
+    });
+
+    // 스와치 생성
+    const generateSwatch = async () => {
+      if(!local.photo){ alert("사진을 먼저 올려줘!"); return; }
+      const img = new Image();
+      img.onload = ()=>{
+        const palette = quantizeColorsFromImg(img, 4);
+        let type = matType;
+        if(type==="auto"){ type = guessMaterialFromImg(img); setMatType(type); }
+        const svg = makeSwatch(type, palette, Number(strength));
+        onMakeSwatch({ palette, matType:type, strength:Number(strength), swatchSVG:svg });
+        setLocal(prev=>({...prev, palette, matType:type, strength:Number(strength), swatchSVG:svg }));
+      };
+      img.src = local.photo;
+    };
+
+    // 타입/강도 바뀌면 팔레트가 있을 때 재생성
+    React.useEffect(()=>{
+      if(local.palette){
+        const svg = makeSwatch(matType==="auto"?"plain":matType, local.palette, Number(strength));
+        setLocal(prev=>({...prev, swatchSVG:svg, matType, strength:Number(strength)}));
+      }
+      // eslint-disable-next-line
+    },[matType,strength]);
+
+    return(
+      <div className="fixed inset-0 z-50 flex justify-end bg-black/30">
+        <div className="h-full w-full max-w-xl bg-white p-6 overflow-y-auto shadow-2xl">
+          <div className="flex justify-between items-center">
+            <div>
+              <div className="text-xs text-stone-500">{day}</div>
+              <h3 className="text-xl font-semibold">기록 편집</h3>
+            </div>
+            <div className="flex gap-2">
+              <button className="px-3 py-2 rounded-xl border" onClick={()=>onSave(local)}>저장</button>
+              <button className="px-3 py-2 rounded-xl bg-stone-900 text-white" onClick={onClose}>닫기</button>
+            </div>
+          </div>
+
+          <div className="mt-6 space-y-6">
+            <section>
+              <label className="block text-sm font-medium mb-2">메모</label>
+              <textarea rows={4} className="w-full rounded-xl border p-3 outline-none focus:ring-2 focus:ring-stone-300"
+                value={local.notes}
+                onChange={e=>setLocal({...local,notes:e.target.value})}
+                placeholder="예: 벨벳 자켓 + 실크 스커트"/>
+            </section>
+
+            <section>
+              <h4 className="text-sm font-medium mb-2">이모지</h4>
+              <div className="flex flex-wrap gap-2">
+                {MOODS.map(m=>(
+                  <button key={m}
+                          className={`px-3 py-2 rounded-xl text-sm ${local.moods.includes(m)?'bg-stone-900 text-white':'border hover:bg-stone-50'}`}
+                          onClick={()=>toggleMood(m)}>{m}</button>
+                ))}
+              </div>
+            </section>
+
+            <section>
+              <h4 className="text-sm font-medium mb-2">오늘의 착장 사진</h4>
+              {local.photo ? <img src={local.photo} alt="outfit" className="w-full rounded-xl border object-cover"/> : null}
+              <input type="file" accept="image/*" className="mt-3"
+                     onChange={e=>{
+                       const f=e.target.files?.[0];
+                       if(!f)return;
+                       const r=new FileReader();
+                       r.onload=()=>setLocal(prev=>({...prev,photo:r.result}));
+                       r.readAsDataURL(f);
+                     }}/>
+            </section>
+
+            {/* ===== 소재 스와치 ===== */}
+            <section>
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-medium">소재 스와치</h4>
+                <div className="flex gap-2">
+                  <select value={matType} onChange={e=>setMatType(e.target.value)}
+                          className="border rounded-lg px-2 py-1 text-sm">
+                    <option value="auto">자동</option>
+                    <option value="plain">평직</option>
+                    <option value="twill">트윌/데님</option>
+                    <option value="rib">립 니트</option>
+                    <option value="herringbone">헤링본</option>
+                    <option value="satin">새틴/실크</option>
+                    <option value="leather">레더</option>
+                  </select>
+                  <input type="range" min="0" max="100" value={strength}
+                         onChange={e=>setStrength(e.target.value)} className="w-28"/>
+                  <button className="px-3 py-2 rounded-xl border hover:bg-stone-50"
+                          onClick={generateSwatch}>스와치 만들기</button>
+                </div>
+              </div>
+
+              <div className="mt-3">
+                <div className="text-xs text-stone-500 mb-1">팔레트</div>
+                <div className="flex gap-1">
+                  {(local.palette||[]).map((c,i)=>
+                    <span key={i} className="inline-block w-4 h-4 rounded border" style={{background:c}}/>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-3">
+                <div className="rounded-xl border overflow-hidden" style={{aspectRatio:"1/1"}}>
+                  {local.swatchSVG
+                    ? <div dangerouslySetInnerHTML={{__html: local.swatchSVG}}/>
+                    : <div className="w-full h-full bg-stone-50 text-stone-400 flex items-center justify-center">사진 필요</div>}
+                </div>
+              </div>
+            </section>
+
+            <button className="px-3 py-2 rounded-xl border border-red-200 text-red-700 hover:bg-red-50"
+                    onClick={onDelete}>이 날짜 기록 삭제</button>
+          </div>
+        </div>
+        <button className="absolute right-[max(24rem,40%)] top-4 bg-white p-2 rounded-xl shadow" onClick={onClose}>✕</button>
+      </div>
+    );
+  }
+
+  const root=ReactDOM.createRoot(document.getElementById("root"));
+  root.render(<App/>);
   </script>
 </body>
 </html>
