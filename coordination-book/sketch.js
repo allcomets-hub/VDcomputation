@@ -26,6 +26,16 @@ function useLS(key, init){
 function emptyEntry(){ return { notes: "", photo: null, moods: [] }; }
 function emojiOnly(label){ return label ? label.split(" ")[0] : ""; }
 
+// 🩶 페이지가 열리면 data.json 불러오기
+React.useEffect(() => {
+  fetch('data.json')
+    .then(response => response.json())
+    .then(data => {
+      setBook(data); // 기존 상태(book)에 data.json 내용 넣기
+    })
+    .catch(error => console.error('data.json 불러오기 실패:', error));
+}, []);
+
 // ===== 앱 =====
 function App(){
   const today = new Date();
@@ -260,12 +270,4 @@ window.addEventListener("DOMContentLoaded", () => {
   loadData(initialData);
 });
 
-// 🩶 페이지가 열리면 data.json 불러오기
-React.useEffect(() => {
-  fetch('data.json')
-    .then(response => response.json())
-    .then(data => {
-      setBook(data); // 기존 상태(book)에 data.json 내용 넣기
-    })
-    .catch(error => console.error('data.json 불러오기 실패:', error));
-}, []);
+
