@@ -296,7 +296,7 @@ function App(){
   });
 
   // 프린트: 스와치 컬렉션 북
-  const printCollection = () => {
+const printCollection = () => {
   const entries = Object.entries(book)
     .filter(([, v]) => v?.swatchSVG)
     .sort(([a], [b]) => a.localeCompare(b));
@@ -308,41 +308,40 @@ function App(){
     });
   };
 
-  const items = entries.map(([k, v]) => {
-    const photo = v.photo ? `<img src="${v.photo}" class="photo" alt="photo"/>` : "";
-    return `
-      <div class="card" data-key="${k}">
-        <div class="sw-wrap">
-          <div class="sw">${v.swatchSVG}</div>
-          <div class="date-on-swatch">${formatDMY(k)}</div>
-        </div>
-        ${photo}
-      </div>
-    `;
-  }).join("");
-
-const dataObj = Object.fromEntries(
-  entries.map(([k, v]) => ([
-    k,
-    {
-      date: k,
-      dateText: formatDMY(k),
-      matType: v.matType || "-",
-      colors: (v.manualColors && v.manualColors.length ? v.manualColors : (v.palette || [])),
-      photo: v.photo || "",
-      swatchSVG: v.swatchSVG || "",
-      moods: (v.moods || []).map(m => m.split(" ")[0]),
-      note: (v.notes || "")   //  ✅ 여기가 핵심!  (필드명은 v.notes)
-    }
-  ]))
-);
-
+  const dataObj = Object.fromEntries(
+    entries.map(([k, v]) => ([
+      k,
+      {
+        date: k,
+        dateText: formatDMY(k),
+        matType: v.matType || "-",
+        colors: (v.manualColors?.length ? v.manualColors : (v.palette || [])),
+        photo: v.photo || "",
+        swatchSVG: v.swatchSVG || "",
+        moods: (v.moods || []).map(m => m.split(" ")[0]),
+        note: (v.notes || "")
+      }
+    ]))
+  );
 
   const monthName = new Date(year, month - 1).toLocaleDateString("en-GB", { month: "long" });
 
-  // 1) 마크업/스타일만 먼저 씀
-  const html =
-  `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+  // 카드 HTML (인라인 onclick으로 모달 여는 방식)
+  const items = entries.map(([k, v]) => {
+  const photo = v.photo ? `<img src="${v.photo}" class="photo" alt="photo"/>` : "";
+  return `
+    <div class="card" data-key="${k}">
+      <div class="sw-wrap">
+        <div class="sw">${v.swatchSVG}</div>
+        <div class="date-on-swatch">${formatDMY(k)}</div>
+      </div>
+      ${photo}
+    </div>
+  `;
+}).join("");
+
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
    <meta name="viewport" content="width=device-width, initial-scale=1"/>
    <title>Swatch Collection</title>
    <style>
@@ -360,6 +359,7 @@ const dataObj = Object.fromEntries(
           box-shadow:0 0.05cm 0.15cm rgba(0,0,0,.04);display:flex;flex-direction:column;cursor:pointer}
     .sw-wrap{position:relative;width:100%;height:7cm;overflow:hidden;background:#000}
     .sw{position:absolute;inset:0;width:100%;height:100%}
+    .sw svg{width:100%;height:100%;display:block}
     .date-on-swatch{position:absolute;left:50%;top:0.45cm;transform:translateX(-50%);
       color:#fff;font-weight:700;font-size:0.46cm;text-shadow:0 1px 2px rgba(0,0,0,.45),0 0 12px rgba(0,0,0,.35)}
     .photo{width:100%;height:5cm;display:block;object-fit:cover;object-position:center;background:#eee}
@@ -373,105 +373,75 @@ const dataObj = Object.fromEntries(
     .sheet-body{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px 20px}
     .sheet-swatch{border:1px solid var(--line);border-radius:12px;overflow:hidden}
     .sheet-swatch .sw{position:static;height:auto;aspect-ratio:1/1}
-    .sheet-photo{width:100%;height:100%;object-fit:cover;border:1px solid var(--line);border-radius:12px}
+    /* 사진 정사각형 크롭 */
+    .sheet-photo-wrap{width:100%;aspect-ratio:1/1;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#eee}
+    .sheet-photo-wrap img{width:100%;height:100%;object-fit:cover;object-position:center;display:block}
     .meta{margin:8px 20px 16px 20px;font-size:14px;color:#333}
     .pill{display:inline-block;padding:4px 8px;border:1px solid var(--line);border-radius:999px;font-size:12px;margin-right:6px;margin-top:4px}
     .colors{display:flex;gap:6px;margin-top:6px}
     .c{width:18px;height:18px;border-radius:6px;border:1px solid #ddd}
     @page{ size:A3 portrait; margin:1.5cm; }
     @media print{ .modal{display:none!important} .wrap{padding:0} .grid{gap:0.6cm} }
-    /* Swatch 꽉 채우기 */
-.sw svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
    </style>
   </head><body>
     <div class="wrap">
       <div class="header">
         <div class="title-main">Fabric Swatch Collection</div>
-        <div class="subtle">` + monthName + ` · ` + year + `</div>
+        <div class="subtle">${monthName} · ${year}</div>
         <button id="printBtn" style="margin-top:8px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer">Print</button>
       </div>
-      <div class="grid">` + (items || "<div class='subtle'>No swatches yet.</div>") + `</div>
+      <div class="grid">${items || "<div class='subtle'>No swatches yet.</div>"}</div>
     </div>
 
-    <div class="modal" id="modal">
-      <div class="sheet">
-        <div class="sheet-head">
-          <div class="sheet-title" id="m-title">—</div>
-          <button class="close" id="m-close">Close</button>
-        </div>
-        <div class="sheet-body">
-          <div class="sheet-swatch"><div class="sw" id="m-swatch"></div></div>
-          <div><img id="m-photo" class="sheet-photo" alt="photo"/></div>
-        </div>
-        <div class="meta" id="m-meta"></div>
-      </div>
-    </div>
+    <script>
+      var DATA = ${JSON.stringify(dataObj)};
+
+      function $(s){ return document.querySelector(s); }
+      function openModal(key){
+        var d = DATA[key]; if(!d) return;
+        $('#m-title').textContent = d.dateText;
+        $('#m-swatch').innerHTML = d.swatchSVG || '';
+
+        var ph = $('#m-photo');
+        if (d.photo){ ph.src = d.photo; ph.style.display = 'block'; }
+        else { ph.removeAttribute('src'); ph.style.display = 'none'; }
+
+        var html = '<div><b>Material</b> ' + (d.matType || '-') + '</div>';
+        if (d.note && d.note.trim()){
+          html += '<div class="note" style="margin-top:8px;padding:6px 10px;background:#fafafa;border-radius:8px;border:1px solid #eee;white-space:pre-line;"><b>Note</b><br>' + d.note + '</div>';
+        }
+        if (d.moods && d.moods.length){
+          html += '<div class="moods" style="margin-top:6px;">'
+               +  d.moods.map(function(e){ return '<span class="pill" style="display:inline-block;margin:2px 4px 0 0;padding:2px 8px;background:#eee;border-radius:10px;font-size:.9em;">'+ e +'</span>'; }).join('')
+               +  '</div>';
+        }
+        if (d.colors && d.colors.length){
+          html += '<div class="colors" style="margin-top:6px;">'
+               +  d.colors.map(function(c){ return '<span class="c" style="display:inline-block;width:18px;height:18px;border-radius:50%;margin:2px;border:1px solid #ccc;background:'+c+';" title="'+c+'"></span>'; }).join('')
+               +  '</div>';
+        }
+
+        $('#m-meta').innerHTML = html;
+        $('#modal').classList.add('open');
+      }
+
+      function closeModal(){ $('#modal').classList.remove('open'); }
+
+      // 외부 클릭 닫기 + 프린트 버튼
+      document.addEventListener('click', function(e){
+        if (e.target && e.target.id === 'modal') closeModal();
+      });
+      var pb = document.getElementById('printBtn');
+      if (pb) pb.addEventListener('click', function(){ window.print(); });
+      window.onafterprint = closeModal;
+    </script>
   </body></html>`;
 
   const w = window.open("", "_blank");
   w.document.open();
   w.document.write(html);
   w.document.close();
-
-  // 2) 스크립트는 DOM으로 주입 (문자열 깨짐 방지)
-    const code =
-    "(function(){"
-    + "var DATA=" + JSON.stringify(dataObj) + ";"
-    + "var $=function(s){return document.querySelector(s)};"
-    + "var $$=function(s){return document.querySelectorAll(s)};"
-    + "function openModal(key){" 
-  + "var d=DATA[key]; if(!d) return;"
-  + "$('#m-title').textContent=d.dateText;"
-  + "$('#m-swatch').innerHTML=d.swatchSVG||'';"
-  + "var ph=$('#m-photo');"
-  + "if(d.photo){ph.src=d.photo; ph.style.display='block';}"
-  + "else{ph.removeAttribute('src'); ph.style.display='none';}"
-
-  // 메타 정보 영역 (소재, 메모, 무드, 색상)
-  + "var html='<div><b>Material</b> '+(d.matType||'-')+'</div>';"
-
-  // ✅ Note 표시
-  + "if(d.note&&d.note.trim()){"
-    + "html+='<div class=\\'note\\' style=\\'margin-top:8px;padding:6px 10px;background:#fafafa;border-radius:8px;border:1px solid #eee;white-space:pre-line;\\'><b>Note</b><br>'+d.note+'</div>';"
-  + "}"
-
-  // 무드
-  + "if(d.moods&&d.moods.length){"
-    + "html+='<div class=\\'moods\\' style=\\'margin-top:6px;\\'>'"
-    + "+d.moods.map(function(e){return '<span class=\\'pill\\' style=\\'display:inline-block;margin:2px 4px 0 0;padding:2px 8px;background:#eee;border-radius:10px;font-size:0.8em;\\'>'+e+'</span>';}).join('')+'</div>';"
-  + "}"
-
-  // 색상
-  + "if(d.colors&&d.colors.length){"
-    + "html+='<div class=\\'colors\\' style=\\'margin-top:6px;\\'>'"
-    + "+d.colors.map(function(c){return '<span class=\\'c\\' style=\\'display:inline-block;width:18px;height:18px;border-radius:50%;margin:2px;border:1px solid #ccc;background:'+c+'\\' title=\\''+c+'\\'></span>';}).join('')+'</div>';"
-  + "}"
-
-  + "$('#m-meta').innerHTML=html;"
-  + "$('#modal').classList.add('open');"
-+ "}"
-
-    + "function closeModal(){ $('#modal').classList.remove('open'); }"
-    + "$$('#modal').forEach(function(el){ el.addEventListener('click', function(e){ if(e.target.id==='modal') closeModal(); }); });"
-    + "$$('#m-close').forEach(function(el){ el.addEventListener('click', closeModal); });"
-    + "$$('#printBtn').forEach(function(el){ el.addEventListener('click', function(){ window.print(); }); });"
-    + "$$('.card').forEach(function(el){ el.addEventListener('click', function(){ openModal(el.getAttribute('data-key')); }); });"
-    + "window.onafterprint=function(){ closeModal(); };"
-    + "})();";
-
-
-  const s = w.document.createElement("script");
-  s.textContent = code;
-  w.document.body.appendChild(s);
 };
-
-
-
 
   return (
   <div className="max-w-6xl mx-auto min-h-screen bg-[#f7f3ee] text-[#1b1b1b] px-10 py-12 font-sans">
@@ -896,7 +866,7 @@ class ErrorBoundary extends React.Component {
               <button
                 className="px-3 py-2 border rounded-lg"
                 onClick={() => {
-                  localStorage.removeItem("coordination_book_v3");
+                  localStorage.removeItem("coordination_book_v4");
                   location.reload();
                 }}
               >
