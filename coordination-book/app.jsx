@@ -1,4 +1,25 @@
 /* ===== 유틸 ===== */
+
+// ===== Storage 업로드 유틸 =====
+async function uploadDataURL(path, dataUrl) {
+  const FB = window._fb;       // { st }
+  const F  = window._fbFns;    // { sref, uploadString, getDownloadURL }
+  if (!FB?.st) throw new Error("Storage not ready");
+  const r = F.sref(FB.st, path);
+  // data_url로 바로 업로드
+  await F.uploadString(r, dataUrl, "data_url");
+  return await F.getDownloadURL(r);
+}
+
+async function uploadText(path, text) {
+  const FB = window._fb;
+  const F  = window._fbFns;
+  const r  = F.sref(FB.st, path);
+  const blob = new Blob([text], { type: "image/svg+xml;charset=utf-8" });
+  await F.uploadBytes(r, blob);
+  return await F.getDownloadURL(r);
+}
+
 const pad = n => String(n).padStart(2,'0');
 const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const formatDateDMY = (value) =>
@@ -52,6 +73,63 @@ function monthGrid(year,month){
   while(cells.length%7!==0) cells.push(null);
   return cells;
 }
+
+// ---- Firestore 싱크 훅 ----
+// ---- Firestore 싱크 훅 (안전 가드 추가) ----
+function useCloudBook(docId = "public-book") {
+  const [book, setBook] = React.useState(null); // null = 로딩
+
+  React.useEffect(() => {
+    // ✅ Firebase 주입되기 전이면 아무 것도 하지 않음
+    if (!window._fb || !window._fb.db || !window._fbFns || !window._fbFns.doc) return;
+
+    const F = window._fbFns;
+    const ref = F.doc(window._fb.db, "books", docId);
+
+    let unsub;
+    (async () => {
+      try {
+        const snap = await F.getDoc(ref);
+        if (!snap.exists()) await F.setDoc(ref, {}); // 최초 생성
+        unsub = F.onSnapshot(ref, (s) => setBook(s.exists() ? s.data() : {}));
+      } catch (e) {
+        console.error("Firestore init error:", e);
+        setBook({}); // 그래도 렌더 가능하게
+      }
+    })();
+
+    return () => unsub && unsub();
+  }, [docId]); // Firebase 전역은 내부에서 참조
+
+  const save = React.useCallback(async (next) => {
+    setBook(next);
+    try {
+      const F = window._fbFns;
+      if (!window._fb || !F || !F.doc) return;
+      const ref = F.doc(window._fb.db, "books", docId);
+      await F.setDoc(ref, next);
+    } catch (e) {
+      console.error("save error:", e);
+    }
+  }, [docId]);
+
+  return [book ?? {}, save]; // 외부에선 항상 객체로 받도록
+}
+
+
+
+// ---- Firebase 전역 핸들러 ----
+const FB = window._fb || {};
+const F  = window._fbFns || {};
+
+// Firestore ref 도우미 (전역 함수로 접근)
+const firebase = {
+  get db() { return FB.db; },
+  firestoreRef(id) {
+    if (!FB.db || !F.doc) throw new Error("Firebase not ready");
+    return F.doc(FB.db, "books", id);
+  }
+};
 
 // ===[2. 안전한 localStorage 훅]=====================================
 // ===[안정 버전 useLS: 저장 실패 감지 후 자동 재시도]===
@@ -284,22 +362,28 @@ function App(){
   const today=new Date();
   const [year,setYear]=React.useState(today.getFullYear());
   const [month,setMonth]=React.useState(today.getMonth()+1);
-  const [book,setBook]=useLS('coordination_book_v4',{}); // 새 키
+  const [book, saveBook] = useCloudBook("public-book"); // 모두가 보는 공용 문서
+
+   if (book === null) {
+    return <div className="p-8">Loading...</div>;
+  }
+
   const [openDay,setOpenDay]=React.useState(null);
   const cells = React.useMemo(()=>monthGrid(year, month),[year, month]);
 
-  const updateDay=(day,fn)=>setBook(prev=>{
-    const next={...(prev||{})};
-    const cur=prev[day]||emptyEntry();
-    next[day]=fn(cur);
-    return next;
-  });
+  const updateDay = (day, fn) => {
+const base = book || {};
+ const cur  = base[day] || emptyEntry();
+const next = { ...base, [day]: fn(cur) };
+saveBook(next);
+ };
 
   // 프린트: 스와치 컬렉션 북
 const printCollection = () => {
-  const entries = Object.entries(book)
-    .filter(([, v]) => v?.swatchSVG)
-    .sort(([a], [b]) => a.localeCompare(b));
+const entries = Object.entries(book || {})
+  .filter(([, v]) => v?.swatchSVG)
+  .sort(([a], [b]) => a.localeCompare(b));
+
 
   const formatDMY = (value) => {
     const [y, m, d] = String(value).split("-").map(Number);
@@ -470,6 +554,7 @@ const printCollection = () => {
         View Swatch Book
       </button>
     </div>
+    <DemoButtons book={book} saveBook={saveBook} />
   </header>
 
 
@@ -485,7 +570,7 @@ const printCollection = () => {
     if(!date) return <div key={i} className="aspect-square bg-transparent" />;
 
     const key = ymd(date);
-    const entry = book[key];
+    const entry = (book || {})[key];
     const isToday = ymd(new Date())===key;
 
     return (
@@ -542,16 +627,33 @@ const printCollection = () => {
 
       {openDay && (
         <DetailPanel
-          day={openDay}
-          entry={book[openDay]||emptyEntry()}
-          onClose={()=>setOpenDay(null)}
-          onSave={(u)=>{ updateDay(openDay,()=>u); /* 저장 시 흰화면 방지: alert 제거 */ setOpenDay(null); }}
-          onDelete={()=>{
-            // 삭제 모션: 즉시 삭제 후 패널은 열어둠 → 사용자가 닫기 전에도 반영
-            setBook(prev=>{ const n={...(prev||{})}; delete n[openDay]; return n; });
-          }}
-          onMakeSwatch={(payload)=>{ updateDay(openDay, cur => ({...cur, ...payload})); }}
-        />
+  day={openDay}
+  entry={book[openDay]||emptyEntry()}
+  onClose={()=>setOpenDay(null)}
+  onSave={async (u)=>{
+    // 🔹 스와치가 문자열(로컬)이라면 Storage에 저장하고 URL만 남김
+    let toSave = { ...u };
+    try {
+      if (u.swatchSVG && u.swatchSVG.startsWith("<svg")) {
+        const svgURL = await uploadText(`swatches/${openDay}.svg`, u.swatchSVG);
+        toSave = { ...u, swatchSVG: svgURL };  // 🔁 URL로 치환
+      }
+    } catch (e) {
+      console.warn("Swatch upload failed, keep inline svg:", e);
+      // 실패하면 그냥 인라인 SVG로 둬도 되지만 문서가 커질 수 있음
+    }
+
+    // 🔹 Firestore에 저장
+    const next = { ...(book||{}), [openDay]: toSave };
+    await saveBook(next);
+    setOpenDay(null);
+  }}
+  onDelete={()=>{
+    const n = { ...(book||{}) }; delete n[openDay]; saveBook(n);
+  }}
+  onMakeSwatch={(payload)=>{ updateDay(openDay, cur => ({...cur, ...payload})); }}
+/>
+
       )}
     </div>
   );
@@ -570,29 +672,46 @@ function DetailPanel({day,entry,onClose,onSave,onDelete,onMakeSwatch}){
   });
 
   // 사진 업로드 → 자동 팔레트 추출 & (auto면) 자동 소재 인식 + 스와치 생성
-  const onPhotoSelected = (file)=>{
-    if(!file) return;
-    const r=new FileReader();
-    r.onload=()=>{
-      const dataUrl=r.result;
-      setLocal(prev=>({...prev, photo:dataUrl}));
-      const img=new Image();
-      img.onload=()=>{
-        const palette=quantizeColorsFromImg(img,4);
-        let colors = (local.manualColors?.length>0 ? local.manualColors : palette);
-        if(matType==="auto"){
-          const t=guessMaterialFromImg(img);
-          const svg=makeSwatch(t, colors, Number(strength));
-          setLocal(prev=>({...prev, palette, matType:t, swatchSVG:svg }));
-        }else{
-          const svg=makeSwatch(matType, colors, Number(strength));
-          setLocal(prev=>({...prev, palette, swatchSVG:svg }));
-        }
-      };
-      img.src=dataUrl;
-    };
-    r.readAsDataURL(file);
+  // 사진 업로드 → Storage에 업로드 후 URL만 보관
+const onPhotoSelected = (file) => {
+  if (!file) return;
+  const r = new FileReader();
+  r.onload = async () => {
+    try {
+      // 1) 다운스케일 + jpeg (이미 가지고 있는 함수 사용)
+      const jpegData = await fileToDownscaledJPEG(file, 1200, 0.85);
+
+      // 2) 팔레트 뽑기
+      const img = await new Promise((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = reject;
+        im.src = jpegData;
+      });
+      const palette = quantizeColorsFromImg(img, 4);
+
+      // 3) Storage 업로드 (경로: photos/YYYY-MM-DD.jpg)
+      const path = `photos/${day}.jpg`;
+      const photoURL = await uploadDataURL(path, jpegData);
+
+      // 4) 상태 업데이트 (URL만 저장)
+      setLocal(prev => ({ ...prev, photo: photoURL, palette }));
+
+      // 5) auto면 임시 타입 추정 & 미리보기
+      if (matType === "auto") {
+        const t = guessMaterialFromImg(img);
+        const colors = (local.manualColors?.length ? local.manualColors : palette);
+        const svg = makeSwatch(t, colors, Number(strength));
+        setLocal(prev => ({ ...prev, matType: t, swatchSVG: svg }));
+      }
+    } catch (err) {
+      console.error("Image upload error:", err);
+      alert("Image upload failed. Try again.");
+    }
   };
+  r.readAsDataURL(file);
+};
+
 
   // 수동 색상 (있으면 사진 팔레트보다 우선)
   const addManualColor = ()=>{
@@ -879,6 +998,40 @@ class ErrorBoundary extends React.Component {
     }
     return this.props.children;
   }
+}
+
+// === Demo buttons: 샘플 데이터 주입 ===
+function DemoButtons({book, saveBook}) {
+  const inject = () => {
+    const now = new Date();
+    const k1 = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-08`;
+    const k2 = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-09`;
+    const make = (note) => ({
+      notes: note,
+      photo: null,
+      moods: ["😊 happiness","✨ inspiration"],
+      palette: ["#d98aa8","#5c6ea8","#e9d9d1","#2b2b2b"],
+      manualColors: [],
+      matType: "twill",
+      strength: 60,
+      swatchSVG: makeSwatch("twill", ["#d98aa8","#5c6ea8","#e9d9d1","#2b2b2b"], 60)
+    });
+    const next = {...(book||{}), [k1]: make("sample A"), [k2]: make("sample B")};
+    saveBook(next);
+    alert("샘플 2개를 추가했어요!");
+  };
+
+  const clearAll = () => {
+    if (!confirm("모든 기록을 지울까요?")) return;
+    saveBook({});
+  };
+
+  return (
+    <div className="flex gap-2">
+      <button className="px-3 py-2 rounded-full border" onClick={inject}>샘플 넣기</button>
+      <button className="px-3 py-2 rounded-full border" onClick={clearAll}>전체 삭제</button>
+    </div>
+  );
 }
 
 // ✅ 아래 두 줄이 진짜 중요함

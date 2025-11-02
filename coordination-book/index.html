@@ -5,27 +5,66 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Fabric Swatch Collection</title>
 
-  <!-- Tailwind (스타일 없을 때 글자만 보임) -->
+  <!-- Tailwind (스타일) -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- React 18 + ReactDOM (컴포넌트가 안 뜨면 이것 때문) -->
+  <!-- React 18 + ReactDOM -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
 
-  <!-- Babel (app.jsx를 브라우저에서 바로 JSX 컴파일) -->
+  <!-- Babel (브라우저에서 JSX 컴파일) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <style>
-    /* 시스템 폰트(애플 느낌) */
-    html,body { font-family: ui-sans-serif, system-ui, -apple-system, "SF Pro Text",
-                "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji",
-                "Segoe UI Emoji"; }
+    html,body{
+      font-family: ui-sans-serif, system-ui, -apple-system, "SF Pro Text",
+                   "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji",
+                   "Segoe UI Emoji";
+      background:#F5F2EE;
+    }
   </style>
-</head>
-<body class="bg-[#F5F2EE]">
-  <div id="root"></div>
 
-  <!-- 반드시 마지막에: JSX 로드 -->
+  <!-- ✅ Firebase: 단일 버전(12.5.0). 반드시 app.jsx보다 먼저! -->
+  <!-- index.html: Firebase 초기화 (app.jsx보다 위!) -->
+<script type="module">
+  // Firebase v12 모듈
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
+  import { getFirestore, doc, getDoc, setDoc, onSnapshot }
+    from "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js";
+  import { getAuth, signInAnonymously }
+    from "https://www.gstatic.com/firebasejs/12.5.0/firebase-auth.js";
+
+  // ✅ 여기가 firebaseConfig
+  const firebaseConfig = {
+    apiKey: "AIzaSyDJbRAuqHhFQsHGgam-xeRFxOcxA9awTqM",
+    authDomain: "coordination-book.firebaseapp.com",
+    projectId: "coordination-book",
+    storageBucket: "coordination-book.appspot.com",   // ← .appspot.com 이 맞아!
+    messagingSenderId: "139328147409",
+    appId: "1:139328147409:web:b99eca7b99393a92249af0",
+    measurementId: "G-F72EJY2TNK"
+  };
+
+  // 중복 초기화 방지 + 전역 주입
+  if (!window._fb) {
+    const app  = initializeApp(firebaseConfig);
+    const db   = getFirestore(app);
+    const auth = getAuth(app);
+
+    window._fb    = { app, db, auth };
+    window._fbFns = { doc, getDoc, setDoc, onSnapshot };
+
+    // 익명 로그인 (Authentication > 로그인 방법에서 '익명' ON)
+    signInAnonymously(auth).catch(e => console.error("Anon sign-in error:", e));
+  }
+</script>
+
+  <!-- ✅ 앱 코드 불러오기 (네가 만든 app.jsx 파일) -->
   <script type="text/babel" data-presets="react" src="./app.jsx"></script>
+  
+</head>
+
+<body>
+  <div id="root"></div>
 </body>
 </html>
