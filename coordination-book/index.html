@@ -1,6 +1,28 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
+
+  <style>
+  :root {
+    font-family: 'Apple SD Gothic Neo', -apple-system, BlinkMacSystemFont,
+      'Segoe UI', Roboto, 'Noto Sans KR', 'Helvetica Neue', Arial, sans-serif;
+  }
+</style>
+
+  <!-- (선택) 무료 대체: Noto Sans KR -->
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    /* Apple 계열 우선 + 한국어 폴백 */
+    --app-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+      "Apple SD Gothic Neo", "Segoe UI", Roboto, "Noto Sans KR",
+      "Hiragino Kaku Gothic ProN", "Malgun Gothic",
+      "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  }
+  html, body, #root { font-family: var(--app-sans); }
+</style>
+
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Coordination Book</title>
@@ -19,7 +41,7 @@
     }
   </style>
 </head>
-<body class="p-6">
+<body class="font-sans">
   <div id="root"></div>
   <script type="text/babel" data-presets="env,react" src="app.jsx"></script>
 </body>

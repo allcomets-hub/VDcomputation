@@ -1,6 +1,12 @@
 /* ===== 유틸 ===== */
 const pad = n => String(n).padStart(2,'0');
 const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const formatDateDMY = (value) =>
+  new Date(value).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }); // → "1 Nov 2025"
 const range = n => Array.from({length:n},(_,i)=>i);
 
 // ✅ [여기에 아래 코드 추가]
@@ -71,7 +77,7 @@ function useLS(key, init) {
           localStorage.setItem(key, JSON.stringify(v));
         }, 200);
       } catch (err2) {
-        alert("⚠️ 저장에 실패했습니다. 사진 용량이 너무 클 수 있습니다. 일부 기록을 비워주세요.");
+        alert("⚠️ Failed to save. The photo size might be too large. Please clear some entries.");
       }
     }
   }, [key, v]);
@@ -280,7 +286,7 @@ function App(){
   const [month,setMonth]=React.useState(today.getMonth()+1);
   const [book,setBook]=useLS('coordination_book_v4',{}); // 새 키
   const [openDay,setOpenDay]=React.useState(null);
-  const cells=React.useMemo(()=>monthGrid(year,month),[year,month]);
+  const cells = React.useMemo(()=>monthGrid(year, month),[year, month]);
 
   const updateDay=(day,fn)=>setBook(prev=>{
     const next={...(prev||{})};
@@ -290,97 +296,279 @@ function App(){
   });
 
   // 프린트: 스와치 컬렉션 북
-  const printCollection = ()=>{
-    const entries = Object.entries(book)
-      .filter(([,v])=>v?.swatchSVG)
-      .sort(([a],[b])=>a.localeCompare(b));
-    const html = `
-<!DOCTYPE html><html><head><meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Swatch Collection</title>
-<style>
-  body{font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:24px; color:#111}
-  .grid{display:grid; grid-template-columns:repeat(3, 1fr); gap:16px;}
-  @media print {.page-break{page-break-after:always}}
-  .card{border:1px solid #e5e5e5; border-radius:12px; overflow:hidden}
-  .sw{width:100%; aspect-ratio:1/1}
-  .meta{padding:12px}
-  .title{font-weight:600; font-size:14px; margin-bottom:6px}
-  .line{font-size:12px; color:#555}
-  .thumb{width:100%; height:140px; object-fit:cover; border-top:1px solid #eee}
-</style>
-</head><body>
-<h1 style="text-align:center; margin:0 0 16px 0">Fabric Swatch Collection</h1>
-<p style="text-align:center; color:#666; margin:0 0 24px 0">${year} · ${month}월</p>
-<div class="grid">
-${entries.map(([k,v])=>`
-  <div class="card">
-    <div class="sw">${v.swatchSVG}</div>
-    <img src="${v.photo||''}" class="thumb" alt="">
-    <div class="meta">
-      <div class="title">${k}</div>
-      <div class="line">Material: ${v.matType||'-'}</div>
-      <div class="line">Colors: ${(v.manualColors&&v.manualColors.length?v.manualColors:v.palette||[]).join(', ')}</div>
-      <div class="line">${(v.notes||'').replace(/</g,'&lt;')}</div>
-    </div>
-  </div>
-`).join('')}
-</div>
-<script>window.onload=()=>window.print()</script>
-</body></html>`;
-    const w=window.open("","_blank");
-    w.document.open(); w.document.write(html); w.document.close();
+  const printCollection = () => {
+  const entries = Object.entries(book)
+    .filter(([, v]) => v?.swatchSVG)
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  const formatDMY = (value) => {
+    const [y, m, d] = String(value).split("-").map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString("en-GB", {
+      day: "numeric", month: "short", year: "numeric"
+    });
   };
 
+  const items = entries.map(([k, v]) => {
+    const photo = v.photo ? `<img src="${v.photo}" class="photo" alt="photo"/>` : "";
+    return `
+      <div class="card" data-key="${k}">
+        <div class="sw-wrap">
+          <div class="sw">${v.swatchSVG}</div>
+          <div class="date-on-swatch">${formatDMY(k)}</div>
+        </div>
+        ${photo}
+      </div>
+    `;
+  }).join("");
+
+const dataObj = Object.fromEntries(
+  entries.map(([k, v]) => ([
+    k,
+    {
+      date: k,
+      dateText: formatDMY(k),
+      matType: v.matType || "-",
+      colors: (v.manualColors && v.manualColors.length ? v.manualColors : (v.palette || [])),
+      photo: v.photo || "",
+      swatchSVG: v.swatchSVG || "",
+      moods: (v.moods || []).map(m => m.split(" ")[0]),
+      note: (v.notes || "")   //  ✅ 여기가 핵심!  (필드명은 v.notes)
+    }
+  ]))
+);
+
+
+  const monthName = new Date(year, month - 1).toLocaleDateString("en-GB", { month: "long" });
+
+  // 1) 마크업/스타일만 먼저 씀
+  const html =
+  `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+   <meta name="viewport" content="width=device-width, initial-scale=1"/>
+   <title>Swatch Collection</title>
+   <style>
+    :root{ --paper:#f7f3ee; --ink:#1b1b1b; --line:#e5e4e2;
+      --font:"Apple SD Gothic Neo",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans KR",
+      "Hiragino Kaku Gothic ProN","Malgun Gothic","Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol",sans-serif; }
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);font-family:var(--font)}
+    .wrap{max-width:1024px;margin:32px auto;padding:24px}
+    .header{text-align:center;margin-bottom:20px;border-bottom:1px solid var(--line);padding-bottom:8px}
+    .title-main{font-size:28px;font-weight:600}
+    .subtle{color:#666;font-size:12px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,7cm);gap:0.8cm;justify-content:center;align-items:start;margin-top:1cm}
+    .card{width:7cm;height:12cm;background:#fff;border:0.05cm solid var(--line);border-radius:0.4cm;overflow:hidden;
+          box-shadow:0 0.05cm 0.15cm rgba(0,0,0,.04);display:flex;flex-direction:column;cursor:pointer}
+    .sw-wrap{position:relative;width:100%;height:7cm;overflow:hidden;background:#000}
+    .sw{position:absolute;inset:0;width:100%;height:100%}
+    .date-on-swatch{position:absolute;left:50%;top:0.45cm;transform:translateX(-50%);
+      color:#fff;font-weight:700;font-size:0.46cm;text-shadow:0 1px 2px rgba(0,0,0,.45),0 0 12px rgba(0,0,0,.35)}
+    .photo{width:100%;height:5cm;display:block;object-fit:cover;object-position:center;background:#eee}
+    /* Modal */
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;padding:24px;z-index:50}
+    .modal.open{display:flex}
+    .sheet{width:min(880px,90vw);max-height:90vh;background:#fff;border-radius:16px;overflow:auto;border:1px solid var(--line)}
+    .sheet-head{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--line)}
+    .sheet-title{font-size:20px;font-weight:700}
+    .close{appearance:none;border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 12px;cursor:pointer}
+    .sheet-body{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px 20px}
+    .sheet-swatch{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+    .sheet-swatch .sw{position:static;height:auto;aspect-ratio:1/1}
+    .sheet-photo{width:100%;height:100%;object-fit:cover;border:1px solid var(--line);border-radius:12px}
+    .meta{margin:8px 20px 16px 20px;font-size:14px;color:#333}
+    .pill{display:inline-block;padding:4px 8px;border:1px solid var(--line);border-radius:999px;font-size:12px;margin-right:6px;margin-top:4px}
+    .colors{display:flex;gap:6px;margin-top:6px}
+    .c{width:18px;height:18px;border-radius:6px;border:1px solid #ddd}
+    @page{ size:A3 portrait; margin:1.5cm; }
+    @media print{ .modal{display:none!important} .wrap{padding:0} .grid{gap:0.6cm} }
+    /* Swatch 꽉 채우기 */
+.sw svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+   </style>
+  </head><body>
+    <div class="wrap">
+      <div class="header">
+        <div class="title-main">Fabric Swatch Collection</div>
+        <div class="subtle">` + monthName + ` · ` + year + `</div>
+        <button id="printBtn" style="margin-top:8px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer">Print</button>
+      </div>
+      <div class="grid">` + (items || "<div class='subtle'>No swatches yet.</div>") + `</div>
+    </div>
+
+    <div class="modal" id="modal">
+      <div class="sheet">
+        <div class="sheet-head">
+          <div class="sheet-title" id="m-title">—</div>
+          <button class="close" id="m-close">Close</button>
+        </div>
+        <div class="sheet-body">
+          <div class="sheet-swatch"><div class="sw" id="m-swatch"></div></div>
+          <div><img id="m-photo" class="sheet-photo" alt="photo"/></div>
+        </div>
+        <div class="meta" id="m-meta"></div>
+      </div>
+    </div>
+  </body></html>`;
+
+  const w = window.open("", "_blank");
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+
+  // 2) 스크립트는 DOM으로 주입 (문자열 깨짐 방지)
+    const code =
+    "(function(){"
+    + "var DATA=" + JSON.stringify(dataObj) + ";"
+    + "var $=function(s){return document.querySelector(s)};"
+    + "var $$=function(s){return document.querySelectorAll(s)};"
+    + "function openModal(key){" 
+  + "var d=DATA[key]; if(!d) return;"
+  + "$('#m-title').textContent=d.dateText;"
+  + "$('#m-swatch').innerHTML=d.swatchSVG||'';"
+  + "var ph=$('#m-photo');"
+  + "if(d.photo){ph.src=d.photo; ph.style.display='block';}"
+  + "else{ph.removeAttribute('src'); ph.style.display='none';}"
+
+  // 메타 정보 영역 (소재, 메모, 무드, 색상)
+  + "var html='<div><b>Material</b> '+(d.matType||'-')+'</div>';"
+
+  // ✅ Note 표시
+  + "if(d.note&&d.note.trim()){"
+    + "html+='<div class=\\'note\\' style=\\'margin-top:8px;padding:6px 10px;background:#fafafa;border-radius:8px;border:1px solid #eee;white-space:pre-line;\\'><b>Note</b><br>'+d.note+'</div>';"
+  + "}"
+
+  // 무드
+  + "if(d.moods&&d.moods.length){"
+    + "html+='<div class=\\'moods\\' style=\\'margin-top:6px;\\'>'"
+    + "+d.moods.map(function(e){return '<span class=\\'pill\\' style=\\'display:inline-block;margin:2px 4px 0 0;padding:2px 8px;background:#eee;border-radius:10px;font-size:0.8em;\\'>'+e+'</span>';}).join('')+'</div>';"
+  + "}"
+
+  // 색상
+  + "if(d.colors&&d.colors.length){"
+    + "html+='<div class=\\'colors\\' style=\\'margin-top:6px;\\'>'"
+    + "+d.colors.map(function(c){return '<span class=\\'c\\' style=\\'display:inline-block;width:18px;height:18px;border-radius:50%;margin:2px;border:1px solid #ccc;background:'+c+'\\' title=\\''+c+'\\'></span>';}).join('')+'</div>';"
+  + "}"
+
+  + "$('#m-meta').innerHTML=html;"
+  + "$('#modal').classList.add('open');"
++ "}"
+
+    + "function closeModal(){ $('#modal').classList.remove('open'); }"
+    + "$$('#modal').forEach(function(el){ el.addEventListener('click', function(e){ if(e.target.id==='modal') closeModal(); }); });"
+    + "$$('#m-close').forEach(function(el){ el.addEventListener('click', closeModal); });"
+    + "$$('#printBtn').forEach(function(el){ el.addEventListener('click', function(){ window.print(); }); });"
+    + "$$('.card').forEach(function(el){ el.addEventListener('click', function(){ openModal(el.getAttribute('data-key')); }); });"
+    + "window.onafterprint=function(){ closeModal(); };"
+    + "})();";
+
+
+  const s = w.document.createElement("script");
+  s.textContent = code;
+  w.document.body.appendChild(s);
+};
+
+
+
+
   return (
-    <div className="max-w-5xl mx-auto">
-      {/* 헤더 (제목 중앙 정렬, 좌우에 네비/프린트) */}
-      <header className="grid grid-cols-3 items-center">
-        <div className="justify-self-start">
-          <button className="px-3 py-2 rounded-xl bg-white border hover:bg-stone-50"
-            onClick={()=>{if(month===1){setYear(y=>y-1); setMonth(12);} else setMonth(m=>m-1);}}>◀</button>
-          <button className="ml-2 px-3 py-2 rounded-xl bg-white border hover:bg-stone-50"
-            onClick={()=>{if(month===12){setYear(y=>y+1); setMonth(1);} else setMonth(m=>m+1);}}>▶</button>
-        </div>
-        <div className="justify-self-center">
-          <h1 className="text-xl font-semibold">{year} · {month}월</h1>
-        </div>
-        <div className="justify-self-end">
-          <button className="px-3 py-2 rounded-xl bg-white border hover:bg-stone-50"
-            onClick={printCollection}>프린트</button>
-        </div>
-      </header>
+  <div className="max-w-6xl mx-auto min-h-screen bg-[#f7f3ee] text-[#1b1b1b] px-10 py-12 font-sans">
+  {/* 헤더 */}
+  <header className="flex items-end justify-between pb-4 mb-10 border-b border-stone-300/60">
+    <h1 className="text-4xl sm:text-5xl leading-none tracking-tight font-semibold">
+      {new Date(year, month-1).toLocaleDateString("en-GB",{ month:"long" })} <span className="font-semibold">{year}</span>
+    </h1>
+    <div className="flex gap-2">
+      <button
+        className="px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
+        onClick={()=>{ if(month===1){ setYear(y=>y-1); setMonth(12);} else setMonth(m=>m-1); }}
+      >
+        Prev
+      </button>
+      <button
+        className="px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
+        onClick={()=>{ if(month===12){ setYear(y=>y+1); setMonth(1);} else setMonth(m=>m+1); }}
+      >
+        Next
+      </button>
+      <button
+        className="ml-2 px-5 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
+        onClick={printCollection}
+      >
+        View Swatch Book
+      </button>
+    </div>
+  </header>
+
 
       {/* 달력 */}
-      <div className="mt-6 grid grid-cols-7 gap-2">
-        {["월","화","수","목","금","토","일"].map(d=>
-          <div key={d} className="text-center text-sm font-semibold text-stone-600">{d}</div>
+      {/* 요일 헤더 (잡지형: 레터스페이싱 넓게, 스몰캡 느낌) */}
+<div className="grid grid-cols-7 text-center text-[11px] tracking-wide text-stone-500 mb-2 font-medium">
+  {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d => <div key={d}>{d}</div>)}
+</div>
+
+{/* 날짜 그리드 */}
+<div className="grid grid-cols-7 gap-3">
+  {cells.map((date,i)=>{
+    if(!date) return <div key={i} className="aspect-square bg-transparent" />;
+
+    const key = ymd(date);
+    const entry = book[key];
+    const isToday = ymd(new Date())===key;
+
+    return (
+      <div
+        key={i}
+        onClick={()=>setOpenDay(key)}
+        className={[
+          "relative group aspect-square rounded-[22px] overflow-hidden cursor-pointer",
+          "bg-white border border-stone-200/70 shadow-[0_1px_0_rgba(0,0,0,0.04)]",
+          "hover:shadow-[0_4px_16px_rgba(0,0,0,0.08)] hover:-translate-y-[2px] transition-all duration-200"
+        ].join(" ")}
+      >
+        {/* 날짜 (우상단, 작은 세리프 숫자) */}
+        <div className="absolute top-2 right-3 text-[11px] tracking-wide font-semibold text-stone-500">
+          {date.getDate()}
+        </div>
+
+        {/* 사진/플레이스홀더 */}
+        {entry?.photo ? (
+          <img
+            src={entry.photo}
+            alt=""
+            className="w-full h-full object-cover brightness-[0.96] group-hover:brightness-100 transition-all duration-200"
+          />
+        ) : (
+          <div className="flex items-center justify-center h-full text-stone-300 text-[12px] italic">
+          </div>
         )}
 
-        {cells.map((date,i)=>{
-          if(!date) return <div key={i} className="day-cell rounded-2xl bg-white"/>;
-          const key=ymd(date);
-          const entry=book[key];
-          return (
-            <div key={i}
-              className="day-cell bg-white rounded-2xl p-2 shadow hover:shadow-md flex flex-col cursor-pointer"
-              onClick={()=>setOpenDay(key)}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium text-stone-700">{date.getDate()}</span>
-                <span className="text-xs">{ entry?.photo ? "📷" : "" }</span>
-              </div>
-              <div className="thumb overflow-hidden rounded-md bg-white flex items-center justify-center">
-                {entry?.photo ? (
-                  <img src={entry.photo} alt="thumb" className="w-full h-full object-cover"/>
-                ) : null}
-              </div>
-              <div className="mt-1 flex gap-1 text-base leading-none">
-                { entry?.moods?.slice(0,4).map((m,idx)=><span key={idx}>{emojiOnly(m)}</span>) }
-              </div>
+        {/* 하단 오버레이(그라데이션 + 무드 2개까지) */}
+        <div className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+          <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-[#1b1b1b]/70 to-transparent"></div>
+          <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
+            <div className="text-white text-[12px] leading-tight font-light">
+              {entry?.moods?.slice(0,2).map((m,i)=><div key={i}>{emojiOnly(m)}</div>)}
             </div>
-          );
-        })}
+            {/* 상태 점: 스와치/포토 */}
+            <div className="flex gap-1">
+              {entry?.swatchSVG ? <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/90"></span> : null}
+              {entry?.photo ? <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/50"></span> : null}
+            </div>
+          </div>
+        </div>
+
+        {/* 오늘 강조 (미세한 링) */}
+        {isToday && (
+          <div className="absolute inset-0 rounded-[22px] ring-2 ring-stone-900/35 pointer-events-none"></div>
+        )}
       </div>
+    );
+  })}
+</div>
+
 
       {openDay && (
         <DetailPanel
@@ -404,7 +592,7 @@ function DetailPanel({day,entry,onClose,onSave,onDelete,onMakeSwatch}){
   const [local,setLocal]=React.useState(entry);
   const [matType,setMatType]=React.useState(entry.matType||"auto");
   const [strength,setStrength]=React.useState(entry.strength ?? 60);
-  const MOODS=["😀 기쁨","😌 차분","💖 로맨틱","⚡ 집중","✨ 영감","😴 피곤","🌞 맑음","☁️ 흐림","🌧️ 비","😡 화남"];
+  const MOODS=["😊 happiness","😌 cozy","💖 romantic","⚡ concentration","✨ inspiration","😴 tired","😡 anger", "😭 sad", "😔 loneliness", "🌞 sunny","☁️ cloudy","🌧️ rainy", "☃️ snowy"];
 
   const toggleMood=m=>setLocal(prev=>{
     const has=prev.moods.indexOf(m)>=0;
@@ -514,29 +702,29 @@ function DetailPanel({day,entry,onClose,onSave,onDelete,onMakeSwatch}){
       <div className="h-full w-full max-w-xl bg-white p-6 overflow-y-auto shadow-2xl">
         <div className="flex justify-between items-center">
           <div>
-            <div className="text-xs text-stone-500">{day}</div>
-            <h3 className="text-xl font-semibold">기록 편집</h3>
+            <div className="text-xs text-stone-500">{formatDateDMY(day)}</div>
+            <h3 className="text-xl font-semibold">Today's record</h3>
           </div>
           <div className="flex gap-2">
-            <button className="px-3 py-2 rounded-xl border" onClick={()=>onSave(local)}>저장</button>
-            <button className="px-3 py-2 rounded-xl bg-stone-900 text-white" onClick={onClose}>닫기</button>
+            <button className="px-3 py-2 rounded-xl border" onClick={()=>onSave(local)}>Save</button>
+            <button className="px-3 py-2 rounded-xl bg-stone-900 text-white" onClick={onClose}>Close</button>
           </div>
         </div>
 
         <div className="mt-6 space-y-6">
           {/* 메모 */}
           <section>
-            <label className="block text-sm font-medium mb-2">메모</label>
+            <label className="block text-sm font-medium mb-2">Note</label>
             <textarea rows={4}
               className="w-full rounded-xl border p-3 outline-none focus:ring-2 focus:ring-stone-300"
               value={local.notes}
               onChange={e=>setLocal({...local, notes:e.target.value})}
-              placeholder="예: 벨벳 자켓 + 실크 스커트"/>
+              placeholder="ex: It’s date day! I wanna look pretty today!"/>
           </section>
 
           {/* 이모지 */}
           <section>
-            <h4 className="text-sm font-medium mb-2">이모지</h4>
+            <h4 className="text-sm font-medium mb-2">Emoji</h4>
             <div className="flex flex-wrap gap-2">
               {MOODS.map(m=>(
                 <button key={m}
@@ -546,74 +734,74 @@ function DetailPanel({day,entry,onClose,onSave,onDelete,onMakeSwatch}){
             </div>
           </section>
 
-          {/* 사진 */}
           <section>
-            <h4 className="text-sm font-medium mb-2">오늘의 착장 사진</h4>
-            {local.photo ? <img src={local.photo} alt="outfit" className="w-full rounded-xl border object-cover"/> : null}
-            <input
-  type="file"
-  accept="image/*"
-  className="mt-3"
- onChange={async (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
+  <h4 className="text-sm font-medium mb-2">OOTD</h4>
 
-  try {
-    // 1) 업로드 파일을 다운스케일 + JPEG로 변환 (네 코드 유지)
-    const jpegData = await fileToDownscaledJPEG(file, 1200, 0.85);
+   {local.photo ? (
+    <img src={local.photo} alt="outfit" className="w-full rounded-xl border object-cover" />
+  ) : null}
 
-    // 2) 10MB 제한 체크 (네 코드 유지)
-    const bytes = dataUrlBytes(jpegData);
-    if (bytes > 10 * 1024 * 1024) {
-      alert("이미지 용량이 너무 큽니다 (최대 10MB).");
-      return;
-    }
+  <label className="inline-flex items-center gap-2 mt-3 px-4 py-2 border rounded-xl cursor-pointer hover:bg-stone-50">
+    <span> {local.photo ? "Upload Again" : "Choose File"}</span>
+    <span className="text-sm text-stone-500">{local.photo ? "File selected" : "No file chosen"}</span>
 
-    // 3) 자동 팔레트 추출 (여기가 추가된 부분)
-    await new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
+    <input
+      type="file"
+      accept="image/*"
+      className="hidden"
+      onChange={async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
         try {
-          const palette = quantizeColorsFromImg(img, 4); // 이미 있는 함수 사용
-          // 사진 + 팔레트 동시 저장
-          setLocal((prev) => ({ ...prev, photo: jpegData, palette }));
-          resolve();
+          // 1) downscale + JPEG
+          const jpegData = await fileToDownscaledJPEG(file, 1200, 0.85);
+
+          // 2) 10MB limit
+          const bytes = dataUrlBytes(jpegData);
+          if (bytes > 10 * 1024 * 1024) {
+            alert("The image size is too large (max 10MB).");
+            return;
+          }
+
+          // 3) extract palette
+          await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+              try {
+                const palette = quantizeColorsFromImg(img, 4);
+                setLocal((prev) => ({ ...prev, photo: jpegData, palette }));
+                resolve();
+              } catch (err) {
+                console.error("Palette extraction failed:", err);
+                setLocal((prev) => ({ ...prev, photo: jpegData }));
+                resolve();
+              }
+            };
+            img.onerror = reject;
+            img.src = jpegData;
+          });
         } catch (err) {
-          console.error("팔레트 추출 실패:", err);
-          // 팔레트만 빼고 사진만 저장
-          setLocal((prev) => ({ ...prev, photo: jpegData }));
-          resolve();
+          console.error("Image processing error:", err);
+          alert("Failed to load the image. Please try a different file.");
         }
-      };
-      img.onerror = reject;
-      img.src = jpegData;
-    });
-
-    // (선택) 팝업이 흰화면 원인이 될 수 있으니 굳이 안내문 필요 없으면 생략 권장
-    // alert("사진이 등록되었습니다!");
-
-  } catch (err) {
-    console.error("이미지 처리 오류:", err);
-    alert("이미지를 불러오지 못했습니다. 다른 형식을 시도해보세요.");
-  }
-}}
-
-/>
-
-          </section>
+      }}
+    />
+  </label>
+</section>
 
           {/* 수동 색상 */}
           <section>
             <div className="flex items-center justify-between">
-              <h4 className="text-sm font-medium">스와치 색상</h4>
+              <h4 className="text-sm font-medium">Swatch</h4>
               <div className="flex gap-2">
-                <button className="px-3 py-2 rounded-xl border hover:bg-stone-50" onClick={addManualColor}>+ 수동 색상</button>
-                <button className="px-3 py-2 rounded-xl border hover:bg-stone-50" onClick={clearManualColors}>수동 색상 지우기</button>
+                <button className="px-3 py-2 rounded-xl border hover:bg-stone-50" onClick={addManualColor}>+ manual color</button>
+                <button className="px-3 py-2 rounded-xl border hover:bg-stone-50" onClick={clearManualColors}>reset manual color</button>
               </div>
             </div>
             {/* 자동 팔레트 미리보기 */}
             <div className="mt-3">
-              <div className="text-xs text-stone-500 mb-1">자동 팔레트</div>
+              <div className="text-xs text-stone-500 mb-1">automatic color extraction palette</div>
               <div className="flex gap-1">
                 {(local.palette||[]).map((c,i)=>
                   <span key={i} className="inline-block w-4 h-4 rounded border" style={{background:c}} title={c}/>
@@ -622,7 +810,7 @@ function DetailPanel({day,entry,onClose,onSave,onDelete,onMakeSwatch}){
             </div>
             {/* 수동 색상 피커 */}
             <div className="mt-3">
-              <div className="text-xs text-stone-500 mb-1">수동 색상(있으면 이것이 우선)</div>
+              <div className="text-xs text-stone-500 mb-1">color picker (takes priority if set) </div>
               <div className="flex flex-wrap gap-2">
                 {(local.manualColors||[]).map((c,i)=>(
                   <div key={i} className="flex items-center gap-1">
@@ -635,7 +823,7 @@ function DetailPanel({day,entry,onClose,onSave,onDelete,onMakeSwatch}){
                   </div>
                 ))}
                 {(!local.manualColors || local.manualColors.length===0) && (
-                  <div className="text-xs text-stone-400">수동 색상이 없으면 사진 팔레트를 사용합니다.</div>
+                  <div className="text-xs text-stone-400">If no manual color is selected, the photo-based palette will be applied.</div>
                 )}
               </div>
             </div>
@@ -645,33 +833,33 @@ function DetailPanel({day,entry,onClose,onSave,onDelete,onMakeSwatch}){
           <section>
             <div className="flex items-center gap-2">
               <select value={matType} onChange={e=>setMatType(e.target.value)} className="border rounded-lg px-2 py-1 text-sm">
-                <option value="auto">자동</option>
-                <option value="plain">평직</option>
-                <option value="twill">트윌/데님</option>
-                <option value="rib">립 니트</option>
-                <option value="herringbone">헤링본</option>
-                <option value="satin">새틴/실크</option>
-                <option value="leather">레더</option>
-                <option value="sequin">스팽글</option>
+                <option value="auto">auto</option>
+                <option value="plain">plain</option>
+                <option value="twill">twill/denim</option>
+                <option value="rib">rib knit</option>
+                <option value="herringbone">herringbone</option>
+                <option value="satin">satin/silk</option>
+                <option value="leather">leather</option>
+                <option value="sequin">sequin</option>
               </select>
               <input type="range" min="0" max="100" value={strength}
                 onChange={e=>setStrength(e.target.value)} className="w-32"/>
               <button className="px-3 py-2 rounded-xl border hover:bg-stone-50"
-                onClick={generateSwatch}>스와치 만들기</button>
+                onClick={generateSwatch}>create a swatch</button>
             </div>
 
             <div className="mt-3">
               <div className="rounded-xl border overflow-hidden" style={{aspectRatio:"1/1", background:'#fafafa'}}>
                 {local.swatchSVG
                   ? <div dangerouslySetInnerHTML={{__html: local.swatchSVG}}/>
-                  : <div className="w-full h-full text-stone-400 flex items-center justify-center">사진 또는 색상을 선택해 스와치를 생성하세요</div>}
+                  : <div className="w-full h-full text-stone-400 flex items-center justify-center">Select a photo or color to create a swatch.</div>}
               </div>
             </div>
           </section>
 
           <div className="flex gap-2">
             <button className="px-3 py-2 rounded-xl border border-red-200 text-red-700 hover:bg-red-50" onClick={onDelete}>
-              이 날짜 기록 삭제
+              Reset record
             </button>
           </div>
         </div>
