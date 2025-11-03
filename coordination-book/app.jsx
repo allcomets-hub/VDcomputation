@@ -36,6 +36,120 @@ const dataUrlBytes = (dataUrl) => {
   return Math.floor(b64.length * 0.75);
 };
 
+// HEIC 파일이면 JPEG Blob으로 변환한 뒤 File로 래핑해 반환
+async function ensureJpegFile(file) {
+  // 확장자/타입 모두 체크 (대문자 HEIC도 커버)
+  const name = file.name || "";
+  const type = file.type || "";
+  const looksHeic =
+    /(\.heic|\.heif)$/i.test(name) || /image\/hei[cf]/i.test(type);
+
+  if (!looksHeic) return file;
+
+  // heic2any 존재 확인 (동적 로드 백업)
+  async function ensureHeic2anyLoaded() {
+    if (window.heic2any) return;
+    try {
+      // 이미 index.html에 넣었는데도 못찾는 경우 대비 백업 로드
+      await new Promise((res, rej) => {
+        const s = document.createElement("script");
+        s.src =
+          "https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js";
+        s.onload = () => res();
+        s.onerror = rej;
+        document.head.appendChild(s);
+      });
+    } catch {
+      // 마지막 백업
+      await new Promise((res, rej) => {
+        const s = document.createElement("script");
+        s.src =
+          "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
+        s.onload = () => res();
+        s.onerror = rej;
+        document.head.appendChild(s);
+      });
+    }
+  }
+
+  await ensureHeic2anyLoaded();
+  if (!window.heic2any) {
+    throw new Error("heic2any not loaded");
+  }
+
+  // 일부 브라우저/파일에서 heic2any가 Blob '배열'을 반환하는 일이 있어.
+  const out = await window.heic2any({
+    blob: file,
+    toType: "image/jpeg",
+    quality: 0.9,
+    multiple: false, // 그래도 배열로 줄 때가 있어…
+  });
+
+  const blob = Array.isArray(out) ? out[0] : out;
+  if (!(blob instanceof Blob)) {
+    throw new Error("HEIC conversion failed: invalid output");
+  }
+
+  // File로 래핑 (이름은 .jpg로)
+  return new File(
+    [blob],
+    name.replace(/\.(heic|heif)$/i, ".jpg"),
+    { type: "image/jpeg" }
+  );
+}
+
+/* ===== Tiny toast ===== */
+(function setupToast() {
+  if (document.getElementById("toast-root")) return;
+
+  const root = document.createElement("div");
+  root.id = "toast-root";
+  Object.assign(root.style, {
+    position: "fixed",
+    inset: "0 auto auto 0",
+    left: 0,
+    right: 0,
+    top: "14px",
+    display: "flex",
+    justifyContent: "center",
+    pointerEvents: "none",
+    zIndex: 9999
+  });
+  document.body.appendChild(root);
+
+  window.toast = function toast(message, { variant = "ok", duration = 1400 } = {}) {
+    const el = document.createElement("div");
+    el.textContent = message;
+    Object.assign(el.style, {
+      pointerEvents: "auto",
+      background: variant === "error" ? "#b91c1c" : variant === "info" ? "#334155" : "#111827",
+      color: "white",
+      padding: "10px 14px",
+      borderRadius: "12px",
+      boxShadow: "0 6px 20px rgba(0,0,0,.18)",
+      fontSize: "14px",
+      fontWeight: 500,
+      letterSpacing: ".2px",
+      transform: "translateY(-8px)",
+      opacity: "0",
+      transition: "all .18s ease",
+      maxWidth: "80vw",
+      whiteSpace: "pre-wrap"
+    });
+    root.appendChild(el);
+    requestAnimationFrame(() => {
+      el.style.transform = "translateY(0)";
+      el.style.opacity = "1";
+    });
+    setTimeout(() => {
+      el.style.transform = "translateY(-8px)";
+      el.style.opacity = "0";
+      setTimeout(() => el.remove(), 200);
+    }, duration);
+  };
+})();
+
+
 async function fileToDownscaledJPEG(file, maxW = 1024, quality = 0.8) {
   const img = await new Promise((res, rej) => {
     const url = URL.createObjectURL(file);
@@ -58,7 +172,10 @@ async function fileToDownscaledJPEG(file, maxW = 1024, quality = 0.8) {
   ctx.drawImage(img, 0, 0, outW, outH);
 
   const dataUrl = c.toDataURL("image/jpeg", quality);
-  URL.revokeObjectURL(img.src);
+// ✅ 삭제 또는 아래처럼 setTimeout으로 지연
+setTimeout(() => URL.revokeObjectURL(img.src), 1000);
+return dataUrl;
+
   return dataUrl;
 }
 
@@ -846,46 +963,64 @@ const onPhotoSelected = (file) => {
 
     <input
       type="file"
-      accept="image/*"
-      className="hidden"
+accept="image/jpeg,image/jpg,image/png,image/heic,image/heif,.heic,.heif,.HEIC,.HEIF"
+  className="hidden"
       onChange={async (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
+const raw = e.target.files?.[0];
+if (!raw) return;
 
+// 🔁 HEIC이면 JPEG 파일로 변환
+let file;
+try {
+  file = await ensureJpegFile(raw);
+} catch (err) {
+  console.error("HEIC convert error:", err);
+  alert("HEIC 변환에 실패했어요. 다시 시도하거나 JPG/PNG로 올려주세요.");
+  return;
+}
+
+// ⬇️ 이후 기존 로직(다운스케일 → 팔레트추출 → 상태반영)
+const jpegData = await fileToDownscaledJPEG(file, 1200, 0.85);
+// ... 생략 (dataUrlBytes 체크, 이미지 로드해 팔레트 뽑기 등)
+
+
+  try {
+    // 0) HEIC이면 JPEG로 변환
+    const jpegFile = await ensureJpegFile(raw);
+
+    // 1) 다운스케일 + JPEG dataURL
+    const jpegData = await fileToDownscaledJPEG(jpegFile, 1200, 0.85);
+    if (!jpegData.startsWith("data:image")) {
+      throw new Error("Invalid image dataURL");
+    }
+
+    // 2) 팔레트 추출 (이미지 로드)
+    await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
         try {
-          // 1) downscale + JPEG
-          const jpegData = await fileToDownscaledJPEG(file, 1200, 0.85);
-
-          // 2) 10MB limit
-          const bytes = dataUrlBytes(jpegData);
-          if (bytes > 10 * 1024 * 1024) {
-            alert("The image size is too large (max 10MB).");
-            return;
-          }
-
-          // 3) extract palette
-          await new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => {
-              try {
-                const palette = quantizeColorsFromImg(img, 4);
-                setLocal((prev) => ({ ...prev, photo: jpegData, palette }));
-                resolve();
-              } catch (err) {
-                console.error("Palette extraction failed:", err);
-                setLocal((prev) => ({ ...prev, photo: jpegData }));
-                resolve();
-              }
-            };
-            img.onerror = reject;
-            img.src = jpegData;
-          });
+          const palette = quantizeColorsFromImg(img, 4);
+          setLocal((prev) => ({ ...prev, photo: jpegData, palette }));
+          resolve();
         } catch (err) {
-          console.error("Image processing error:", err);
-          alert("Failed to load the image. Please try a different file.");
+          console.warn("Palette extraction failed:", err);
+          setLocal((prev) => ({ ...prev, photo: jpegData }));
+          resolve();
         }
-      }}
-    />
+      };
+      img.onerror = () =>
+        reject(new Error("Failed to load the image for palette extraction"));
+      img.src = jpegData;
+    });
+  } catch (err) {
+    console.error("Image processing error:", err);
+    alert(
+      "이미지 로드/변환에 실패했어요. 다른 파일(JPG/PNG/HEIC)로 다시 시도해 주세요."
+    );
+  }
+}}
+
+/>
   </label>
 </section>
 
@@ -993,14 +1128,26 @@ class ErrorBoundary extends React.Component {
                 새로고침
               </button>
               <button
-                className="px-3 py-2 border rounded-lg"
-                onClick={() => {
-                  localStorage.removeItem("coordination_book_v4");
-                  location.reload();
-                }}
-              >
-                저장데이터 초기화
-              </button>
+  className="px-3 py-2 rounded-xl border"
+  onClick={() => {
+    // ① 즉시 팝업
+    window.toast?.("Saving OOTD…", { variant: "info", duration: 800 });
+    // ② 창 바로 닫기 (체감 속도 ↑)
+    onClose();
+    // ③ 저장은 기다리지 않고 진행
+    Promise.resolve(onSave(local))
+      .then(() => {
+        window.toast?.("OOTD saved!", { variant: "ok", duration: 1200 });
+      })
+      .catch((e) => {
+        console.error(e);
+        window.toast?.("Save failed. Please try again.", { variant: "error", duration: 1600 });
+      });
+  }}
+>
+  Save
+</button>
+
             </div>
           </div>
         </div>
