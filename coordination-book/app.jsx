@@ -1,131 +1,26 @@
-/* ===== 유틸 ===== */
-async function normalizeEntryBeforeSave(day, d) {
-  const safe = { ...d };
+/* =========================================================
+   Coordination Book (Local-Only)
+   - Firebase/Storage 완전 제거
+   - 사진/팔레트/스와치/이모지/메모
+   - JSON 백업/불러오기
+   - 프린트(스와치 북)
+   - HEIC 변환 X, "양털" 타입 없음
+   - 저장 후 스와치 고정(lock) 옵션 적용
+   ========================================================= */
 
-  // 절대 dataURL을 Firestore에 넣지 않음
-  if (safe.photo && typeof safe.photo === "string" && safe.photo.startsWith("data:")) {
-    try {
-      safe.photo = await uploadDataURL(`photos/${day}.jpg`, safe.photo);
-    } catch {
-      safe.photo = null;
-    }
-  }
-
-  // swatchSVG는 길면 Storage로 넘기고 URL만 저장
-  if (safe.swatchSVG && safe.swatchSVG.length > 4000) {
-    try {
-      const url = await uploadText(`swatches/${day}.svg`, safe.swatchSVG);
-      safe.swatchSVG = url;
-    } catch {
-      // 실패해도 저장은 진행
-      console.warn("swatchSVG upload failed");
-    }
-  }
-
-  // 컬렉션 필드 최소화(불필요한 폭증 방지)
-  safe.moods = (safe.moods || []).slice(0, 8);
-  safe.manualColors = (safe.manualColors || []).slice(0, 6);
-
-  return safe;
-}
-
-// ===== Storage 업로드 유틸 =====
-async function uploadDataURL(path, dataUrl) {
-  const FB = window._fb;       // { st }
-  const F  = window._fbFns;    // { sref, uploadString, getDownloadURL }
-  if (!FB?.st) throw new Error("Storage not ready");
-  const r = F.sref(FB.st, path);
-  await F.uploadString(r, dataUrl, "data_url");
-  return await F.getDownloadURL(r);
-}
-
-
-async function uploadText(path, text) {
-  const FB = window._fb;
-  const F  = window._fbFns;
-  const r  = F.sref(FB.st, path);
-  const blob = new Blob([text], { type: "image/svg+xml;charset=utf-8" });
-  await F.uploadBytes(r, blob);
-  return await F.getDownloadURL(r);
-}
-
+/* ===== 공용 유틸 ===== */
 const pad = n => String(n).padStart(2,'0');
 const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const range = n => Array.from({length:n},(_,i)=>i);
 const formatDateDMY = (value) =>
   new Date(value).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }); // → "1 Nov 2025"
-const range = n => Array.from({length:n},(_,i)=>i);
-
-// ✅ [여기에 아래 코드 추가]
-const dataUrlBytes = (dataUrl) => {
-  const b64 = dataUrl.split(",")[1] || "";
-  return Math.floor(b64.length * 0.75);
-};
-
-// HEIC 파일이면 JPEG Blob으로 변환한 뒤 File로 래핑해 반환
-async function ensureJpegFile(file) {
-  // 확장자/타입 모두 체크 (대문자 HEIC도 커버)
-  const name = file.name || "";
-  const type = file.type || "";
-  const looksHeic =
-    /(\.heic|\.heif)$/i.test(name) || /image\/hei[cf]/i.test(type);
-
-  if (!looksHeic) return file;
-
-  // heic2any 존재 확인 (동적 로드 백업)
-  async function ensureHeic2anyLoaded() {
-    if (window.heic2any) return;
-    try {
-      // 이미 index.html에 넣었는데도 못찾는 경우 대비 백업 로드
-      await new Promise((res, rej) => {
-        const s = document.createElement("script");
-        s.src =
-          "https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js";
-        s.onload = () => res();
-        s.onerror = rej;
-        document.head.appendChild(s);
-      });
-    } catch {
-      // 마지막 백업
-      await new Promise((res, rej) => {
-        const s = document.createElement("script");
-        s.src =
-          "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
-        s.onload = () => res();
-        s.onerror = rej;
-        document.head.appendChild(s);
-      });
-    }
-  }
-
-  await ensureHeic2anyLoaded();
-  if (!window.heic2any) {
-    throw new Error("heic2any not loaded");
-  }
-
-  // 일부 브라우저/파일에서 heic2any가 Blob '배열'을 반환하는 일이 있어.
-  const out = await window.heic2any({
-    blob: file,
-    toType: "image/jpeg",
-    quality: 0.9,
-    multiple: false, // 그래도 배열로 줄 때가 있어…
+    day: "numeric", month: "short", year: "numeric",
   });
 
-  const blob = Array.isArray(out) ? out[0] : out;
-  if (!(blob instanceof Blob)) {
-    throw new Error("HEIC conversion failed: invalid output");
-  }
-
-  // File로 래핑 (이름은 .jpg로)
-  return new File(
-    [blob],
-    name.replace(/\.(heic|heif)$/i, ".jpg"),
-    { type: "image/jpeg" }
-  );
-}
+const dataUrlBytes = (dataUrl) => {
+  const b64 = (dataUrl||'').split(",")[1] || "";
+  return Math.floor(b64.length * 0.75);
+};
 
 /* ===== Tiny toast ===== */
 (function setupToast() {
@@ -178,37 +73,49 @@ async function ensureJpegFile(file) {
   };
 })();
 
-
-async function fileToDownscaledJPEG(file, maxW = 1024, quality = 0.8) {
-  const img = await new Promise((res, rej) => {
-    const url = URL.createObjectURL(file);
-    const im = new Image();
-    im.onload = () => res(im);
-    im.onerror = rej;
-    im.src = url;
+/* ===== 안전한 localStorage 훅 ===== */
+const LS_KEY = "coordination_book_v5";
+function useLocalBook() {
+  const [book, setBook] = React.useState(() => {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
   });
 
-  const w = img.naturalWidth;
-  const h = img.naturalHeight;
-  const scale = Math.min(1, maxW / Math.max(w, h));
-  const outW = Math.round(w * scale);
-  const outH = Math.round(h * scale);
+  React.useEffect(() => {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(book));
+    } catch (e) {
+      console.warn("localStorage save failed:", e);
+      // Safari 가끔 오류나는 케이스 재시도
+      setTimeout(() => {
+        try { localStorage.setItem(LS_KEY, JSON.stringify(book)); }
+        catch (err2) {
+          alert("Failed to save. Please reduce image size or delete some records.");
+        }
+      }, 200);
+    }
+  }, [book]);
 
-  const c = document.createElement("canvas");
-  c.width = outW;
-  c.height = outH;
-  const ctx = c.getContext("2d");
-  ctx.drawImage(img, 0, 0, outW, outH);
+  const saveDay = React.useCallback((dayKey, data) => {
+    setBook(prev => ({ ...prev, [dayKey]: data }));
+  }, []);
+  const deleteDay = React.useCallback((dayKey) => {
+    setBook(prev => {
+      const n = { ...prev };
+      delete n[dayKey];
+      return n;
+    });
+  }, []);
+  const clearAll = React.useCallback(() => setBook({}), []);
 
-  const dataUrl = c.toDataURL("image/jpeg", quality);
-// ✅ 삭제 또는 아래처럼 setTimeout으로 지연
-setTimeout(() => URL.revokeObjectURL(img.src), 1000);
-return dataUrl;
-
-  return dataUrl;
+  return [book, { saveDay, deleteDay, clearAll }];
 }
 
-
+/* ===== 달력 ===== */
 function monthGrid(year,month){
   const first=new Date(year,month-1,1);
   const start=(first.getDay()+6)%7; // 월요일 시작
@@ -220,93 +127,6 @@ function monthGrid(year,month){
   return cells;
 }
 
-function useCloudBook(docId = "public-book") {
-  const [book, setBook] = React.useState(null);
-
-  React.useEffect(() => {
-    if (!window._fb?.db || !window._fbFns?.collection) return;
-    const F = window._fbFns;
-    // books/{docId}/entries 서브컬렉션 구독
-    const colRef = F.collection(window._fb.db, "books", docId, "entries");
-    const unsub = F.onSnapshot(colRef, (snap) => {
-      const map = {};
-      snap.forEach((d) => (map[d.id] = d.data()));
-      setBook(map);
-    });
-    return () => unsub && unsub();
-  }, [docId]);
-
-  const saveDay = React.useCallback(async (dayKey, data) => {
-    const F = window._fbFns;
-    const ref = F.doc(window._fb.db, "books", docId, "entries", dayKey);
-    await F.setDoc(ref, data, { merge: true });
-  }, [docId]);
-
-  const deleteDay = React.useCallback(async (dayKey) => {
-    const F = window._fbFns;
-    const ref = F.doc(window._fb.db, "books", docId, "entries", dayKey);
-    // 모든 필드 삭제 대신 빈 문서로 덮기거나 필요한 필드만 비움
-    await F.setDoc(ref, {}, { merge: false });
-  }, [docId]);
-
-  return [book || {}, { saveDay, deleteDay }];
-}
-
-// ---- Firebase 전역 핸들러 ----
-const FB = window._fb || {};
-const F  = window._fbFns || {};
-
-// Firestore ref 도우미 (전역 함수로 접근)
-const firebase = {
-  get db() { return FB.db; },
-  firestoreRef(id) {
-    if (!FB.db || !F.doc) throw new Error("Firebase not ready");
-    return F.doc(FB.db, "books", id);
-  }
-};
-
-// ===[2. 안전한 localStorage 훅]=====================================
-// ===[안정 버전 useLS: 저장 실패 감지 후 자동 재시도]===
-function useLS(key, init) {
-  const [v, setV] = React.useState(() => {
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : init;
-    } catch {
-      return init;
-    }
-  });
-
-  React.useEffect(() => {
-    try {
-      localStorage.setItem(key, JSON.stringify(v));
-    } catch (e) {
-      console.warn("localStorage save failed:", e);
-
-      // 👉 재시도 한 번 더 (Safari에서 가짜 에러 방지)
-      try {
-        setTimeout(() => {
-          localStorage.setItem(key, JSON.stringify(v));
-        }, 200);
-      } catch (err2) {
-        alert("⚠️ Failed to save. The photo size might be too large. Please clear some entries.");
-      }
-    }
-  }, [key, v]);
-
-  return [v, setV];
-}
-
-
-
-function emptyEntry(){
-  return {
-    notes:"", photo:null, moods:[],
-    palette:null, manualColors:[], matType:"auto", strength:60, swatchSVG:null
-  };
-}
-const emojiOnly = s => s ? s.split(" ")[0] : "";
-
 /* ===== 색/팔레트 & 소재 추정 ===== */
 const $work = (()=>{ // 숨김 캔버스 1개 재사용
   let c=null;
@@ -315,14 +135,12 @@ const $work = (()=>{ // 숨김 캔버스 1개 재사용
     return c;
   };
 })();
-
 const hexOf=({r,g,b})=>"#"+[r,g,b].map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,"0")).join("");
 const dist=(a,b)=>Math.hypot(a.r-b.r,a.g-b.g,a.b-b.b);
 const avg=list=>{
   const s=list.reduce((p,c)=>({r:p.r+c.r,g:p.g+c.g,b:p.b+c.b}),{r:0,g:0,b:0});
   const n=list.length||1; return {r:s.r/n,g:s.g/n,b:s.b/n};
 };
-
 function quantizeColorsFromImg(img,n=4){
   const c=$work(),ctx=c.getContext('2d',{willReadFrequently:true});
   const S=220;c.width=S;c.height=S;ctx.drawImage(img,0,0,S,S);
@@ -337,7 +155,6 @@ function quantizeColorsFromImg(img,n=4){
   }
   return centers.map(hexOf);
 }
-
 function channelVarianceOf(img){
   const c=$work(),ctx=c.getContext('2d',{willReadFrequently:true});
   const S=160;c.width=S;c.height=S;ctx.drawImage(img,0,0,S,S);
@@ -347,7 +164,6 @@ function channelVarianceOf(img){
   for(let i=0;i<d.length;i+=4){ v+=(d[i]-mr)**2+(d[i+1]-mg)**2+(d[i+2]-mb)**2; }
   return v/n;
 }
-
 function guessMaterialFromImg(img){
   const c=$work(),ctx=c.getContext('2d',{willReadFrequently:true});
   const S=160;c.width=S;c.height=S;ctx.drawImage(img,0,0,S,S);
@@ -375,7 +191,7 @@ function guessMaterialFromImg(img){
   return rough>1600 ? "leather" : "plain";
 }
 
-/* ===== 스와치 SVG들 (7종: + sequin) ===== */
+/* ===== 스와치 SVG들 (양털 없음) ===== */
 function swatchPlain(colors,strength){
   const [c1=colors[0]||"#d7d7d7", c2=colors[1]||"#bdbdbd"] = colors;
   return `
@@ -458,7 +274,6 @@ function swatchLeather(colors,strength){
   <rect width="240" height="240" fill="${c}" filter="url(#pebble)" opacity=".35"/>
 </svg>`;
 }
-
 function swatchSequin(colors, strength) {
   const [bg = colors[0] || "#2a2a2a", shine = colors[1] || "#f8f4dc", sparkle = colors[2] || "#ffffff"] = colors;
   const count = 80 + Math.round(strength * 1.2);
@@ -476,8 +291,6 @@ function swatchSequin(colors, strength) {
   ${circles}
 </svg>`;
 }
-
-
 function makeSwatch(type,colors,strength){
   switch(type){
     case "plain": return swatchPlain(colors,strength);
@@ -491,68 +304,123 @@ function makeSwatch(type,colors,strength){
   }
 }
 
-/* ===== 앱 ===== */
+/* ===== 기본 엔트리 ===== */
+function emptyEntry(){
+  return {
+    notes:"", photo:null, moods:[],
+    palette:null, manualColors:[],
+    matType:"auto", strength:60,
+    swatchSVG:null,
+    swatchLocked:false // 저장 후 스와치가 마음대로 바뀌지 않도록 잠금
+  };
+}
+const emojiOnly = s => s ? s.split(" ")[0] : "";
+
+/* ===== 이미지 다운스케일 → JPEG dataURL ===== */
+async function fileToDownscaledJPEG(file, maxW = 1200, quality = 0.85) {
+  const img = await new Promise((res, rej) => {
+    const url = URL.createObjectURL(file);
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = rej;
+    im.src = url;
+  });
+
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  const scale = Math.min(1, maxW / Math.max(w, h));
+  const outW = Math.round(w * scale);
+  const outH = Math.round(h * scale);
+
+  const c = document.createElement("canvas");
+  c.width = outW;
+  c.height = outH;
+  const ctx = c.getContext("2d");
+  ctx.drawImage(img, 0, 0, outW, outH);
+
+  const dataUrl = c.toDataURL("image/jpeg", quality);
+  setTimeout(() => URL.revokeObjectURL(img.src), 1000);
+  return dataUrl;
+}
+
+/* ===== App ===== */
 function App(){
   const today=new Date();
   const [year,setYear]=React.useState(today.getFullYear());
   const [month,setMonth]=React.useState(today.getMonth()+1);
-  const [book, api] = useCloudBook("public-book");
-
-   if (book === null) {
-    return <div className="p-8">Loading...</div>;
-  }
+  const [book, api] = useLocalBook(); // 로컬 전용
 
   const [openDay,setOpenDay]=React.useState(null);
   const cells = React.useMemo(()=>monthGrid(year, month),[year, month]);
 
-  // 교체 전체
-const updateDay = async (day, fn) => {
-  const base = book || {};
-  const cur  = base[day] || emptyEntry();
-  const next = fn(cur);
-  await api.saveDay(day, next); // 부분 저장(merge)
-};
-
-
-  // 프린트: 스와치 컬렉션 북
-const printCollection = () => {
-const entries = Object.entries(book || {})
-  .filter(([, v]) => v?.swatchSVG)
-  .sort(([a], [b]) => a.localeCompare(b));
-
-
-  const formatDMY = (value) => {
-    const [y, m, d] = String(value).split("-").map(Number);
-    return new Date(y, m - 1, d).toLocaleDateString("en-GB", {
-      day: "numeric", month: "short", year: "numeric"
-    });
+  // JSON 백업
+  const exportJSON = () => {
+    const blob = new Blob([JSON.stringify(book, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement('a'), { href:url, download:'coordination_book.json' });
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    window.toast?.("downloaded the backup JSON.");
+  };
+  // JSON 불러오기
+  const importJSON = async (file) => {
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data || typeof data !== 'object') throw new Error("Invalid JSON");
+      // 매우 큰 dataURL이 많은 경우 경고
+      let totalBytes = 0;
+      Object.values(data).forEach(v => { if (v?.photo?.startsWith("data:")) totalBytes += dataUrlBytes(v.photo); });
+      if (totalBytes > 3_500_000) { // 대략 3.5MB 이상
+        alert("There are too many photos or they are too large. Some of them may not be saved.");
+      }
+      // 통으로 갈아끼우기
+      localStorage.setItem(LS_KEY, JSON.stringify(data));
+      window.toast?.("JSON loaded. Refresh the page.", {variant:"info", duration:1800});
+      setTimeout(()=>location.reload(), 600);
+    } catch(e) {
+      console.error(e);
+      alert("Failed to load JSON.");
+    }
   };
 
-  const dataObj = Object.fromEntries(
-    entries.map(([k, v]) => ([
-      k,
-      {
-        date: k,
-        dateText: formatDMY(k),
-        matType: v.matType || "-",
-        colors: (v.manualColors?.length ? v.manualColors : (v.palette || [])),
-        photo: v.photo || "",
-        swatchSVG: v.swatchSVG || "",
-        moods: (v.moods || []).map(m => m.split(" ")[0]),
-        note: (v.notes || "")
-      }
-    ]))
-  );
+  // 스와치 북 프린트
+  const printCollection = () => {
+    const entries = Object.entries(book || {})
+      .filter(([, v]) => v?.swatchSVG)
+      .sort(([a], [b]) => a.localeCompare(b));
 
-  const monthName = new Date(year, month - 1).toLocaleDateString("en-GB", { month: "long" });
+    const formatDMY = (value) => {
+      const [y, m, d] = String(value).split("-").map(Number);
+      return new Date(y, m - 1, d).toLocaleDateString("en-GB", {
+        day: "numeric", month: "short", year: "numeric"
+      });
+    };
+    const dataObj = Object.fromEntries(
+      entries.map(([k, v]) => ([
+        k,
+        {
+          date: k,
+          dateText: formatDMY(k),
+          matType: v.matType || "-",
+          colors: (v.manualColors?.length ? v.manualColors : (v.palette || [])),
+          photo: v.photo || "",
+          swatchSVG: v.swatchSVG || "",
+          moods: (v.moods || []).map(m => m.split(" ")[0]),
+          note: (v.notes || "")
+        }
+      ]))
+    );
+    const monthName = new Date(year, month - 1).toLocaleDateString("en-GB", { month: "long" });
+const items = entries.map(([k, v]) => {
+  const photo = v.photo
+    ? `<img src="${v.photo}" class="photo" alt="photo"/>`
+    : "";
 
-  // 카드 HTML (인라인 onclick으로 모달 여는 방식)
-  const items = entries.map(([k, v]) => {
-  const photo = v.photo ? `<img src="${v.photo}" class="photo" alt="photo"/>` : "";
   return `
     <div class="card" data-key="${k}">
       <div class="sw-wrap">
-        <div class="sw">${v.swatchSVG}</div>
+        <div class="sw">${v.swatchSVG || ""}</div>
         <div class="date-on-swatch">${formatDMY(k)}</div>
       </div>
       ${photo}
@@ -561,303 +429,240 @@ const entries = Object.entries(book || {})
 }).join("");
 
 
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
-   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-   <title>Swatch Collection</title>
-   <style>
-    :root{ --paper:#f7f3ee; --ink:#1b1b1b; --line:#e5e4e2;
-      --font:"Apple SD Gothic Neo",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans KR",
-      "Hiragino Kaku Gothic ProN","Malgun Gothic","Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol",sans-serif; }
-    *{box-sizing:border-box}
-    html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);font-family:var(--font)}
-    .wrap{max-width:1024px;margin:32px auto;padding:24px}
-    .header{text-align:center;margin-bottom:20px;border-bottom:1px solid var(--line);padding-bottom:8px}
-    .title-main{font-size:28px;font-weight:600}
-    .subtle{color:#666;font-size:12px}
-    .grid{display:grid;grid-template-columns:repeat(auto-fit,7cm);gap:0.8cm;justify-content:center;align-items:start;margin-top:1cm}
-    .card{width:7cm;height:12cm;background:#fff;border:0.05cm solid var(--line);border-radius:0.4cm;overflow:hidden;
-          box-shadow:0 0.05cm 0.15cm rgba(0,0,0,.04);display:flex;flex-direction:column;cursor:pointer}
-    .sw-wrap{position:relative;width:100%;height:7cm;overflow:hidden;background:#000}
-    .sw{position:absolute;inset:0;width:100%;height:100%}
-    .sw svg{width:100%;height:100%;display:block}
-    .date-on-swatch{position:absolute;left:50%;top:0.45cm;transform:translateX(-50%);
-      color:#fff;font-weight:700;font-size:0.46cm;text-shadow:0 1px 2px rgba(0,0,0,.45),0 0 12px rgba(0,0,0,.35)}
-    .photo{width:100%;height:5cm;display:block;object-fit:cover;object-position:center;background:#eee}
-    /* Modal */
-    .modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;padding:24px;z-index:50}
-    .modal.open{display:flex}
-    .sheet{width:min(880px,90vw);max-height:90vh;background:#fff;border-radius:16px;overflow:auto;border:1px solid var(--line)}
-    .sheet-head{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--line)}
-    .sheet-title{font-size:20px;font-weight:700}
-    .close{appearance:none;border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 12px;cursor:pointer}
-    .sheet-body{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px 20px}
-    .sheet-swatch{border:1px solid var(--line);border-radius:12px;overflow:hidden}
-    .sheet-swatch .sw{position:static;height:auto;aspect-ratio:1/1}
-    /* 사진 정사각형 크롭 */
-    .sheet-photo-wrap{width:100%;aspect-ratio:1/1;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#eee}
-    .sheet-photo-wrap img{width:100%;height:100%;object-fit:cover;object-position:center;display:block}
-    .meta{margin:8px 20px 16px 20px;font-size:14px;color:#333}
-    .pill{display:inline-block;padding:4px 8px;border:1px solid var(--line);border-radius:999px;font-size:12px;margin-right:6px;margin-top:4px}
-    .colors{display:flex;gap:6px;margin-top:6px}
-    .c{width:18px;height:18px;border-radius:6px;border:1px solid #ddd}
-    @page{ size:A3 portrait; margin:1.5cm; }
-    @media print {
-  html, body { width: 297mm; height: 420mm; transform: scale(1); transform-origin: top left; }
-}
-    @media print{ .modal{display:none!important} .wrap{padding:0} .grid{gap:0.6cm} }
-   </style>
-  </head><body>
-    <div class="wrap">
-      <div class="header">
-        <div class="title-main">Fabric Swatch Collection</div>
-        <div class="subtle">${monthName} · ${year}</div>
-        <button id="printBtn" style="margin-top:8px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer">Print</button>
-      </div>
-      <div class="grid">${items || "<div class='subtle'>No swatches yet.</div>"}</div>
-    </div>
-
-    <script>
-      var DATA = ${JSON.stringify(dataObj)};
-
-      function $(s){ return document.querySelector(s); }
-      function openModal(key){
-        var d = DATA[key]; if(!d) return;
-        $('#m-title').textContent = d.dateText;
-        $('#m-swatch').innerHTML = d.swatchSVG || '';
-
-        var ph = $('#m-photo');
-        if (d.photo){ ph.src = d.photo; ph.style.display = 'block'; }
-        else { ph.removeAttribute('src'); ph.style.display = 'none'; }
-
-        var html = '<div><b>Material</b> ' + (d.matType || '-') + '</div>';
-        if (d.note && d.note.trim()){
-          html += '<div class="note" style="margin-top:8px;padding:6px 10px;background:#fafafa;border-radius:8px;border:1px solid #eee;white-space:pre-line;"><b>Note</b><br>' + d.note + '</div>';
-        }
-        if (d.moods && d.moods.length){
-          html += '<div class="moods" style="margin-top:6px;">'
-               +  d.moods.map(function(e){ return '<span class="pill" style="display:inline-block;margin:2px 4px 0 0;padding:2px 8px;background:#eee;border-radius:10px;font-size:.9em;">'+ e +'</span>'; }).join('')
-               +  '</div>';
-        }
-        if (d.colors && d.colors.length){
-          html += '<div class="colors" style="margin-top:6px;">'
-               +  d.colors.map(function(c){ return '<span class="c" style="display:inline-block;width:18px;height:18px;border-radius:50%;margin:2px;border:1px solid #ccc;background:'+c+';" title="'+c+'"></span>'; }).join('')
-               +  '</div>';
-        }
-
-        $('#m-meta').innerHTML = html;
-        $('#modal').classList.add('open');
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+     <meta name="viewport" content="width=device-width, initial-scale=1"/>
+     <title>Swatch Collection</title>
+     <style>
+      :root{ --paper:#f7f3ee; --ink:#1b1b1b; --line:#e5e4e2;
+        --font:"Apple SD Gothic Neo",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans KR",
+        "Hiragino Kaku Gothic ProN","Malgun Gothic","Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol",sans-serif; }
+      *{box-sizing:border-box}
+      html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);font-family:var(--font)}
+      .wrap{max-width:1024px;margin:32px auto;padding:24px}
+      .header{text-align:center;margin-bottom:20px;border-bottom:1px solid var(--line);padding-bottom:8px}
+      .title-main{font-size:28px;font-weight:600}
+      .subtle{color:#666;font-size:12px}
+      .grid{display:grid;grid-template-columns:repeat(auto-fit,7cm);gap:0.8cm;justify-content:center;align-items:start;margin-top:1cm}
+      .card{width:7cm;height:12cm;background:#fff;border:0.05cm solid var(--line);border-radius:0.4cm;overflow:hidden;
+            box-shadow:0 0.05cm 0.15cm rgba(0,0,0,.04);display:flex;flex-direction:column;cursor:pointer}
+      .sw-wrap{position:relative;width:100%;height:7cm;overflow:hidden;background:#000}
+      .sw{position:absolute;inset:0;width:100%;height:100%}
+      .sw svg{width:100%;height:100%;display:block}
+      .date-on-swatch{position:absolute;left:50%;top:0.45cm;transform:translateX(-50%);
+        color:#fff;font-weight:700;font-size:0.46cm;text-shadow:0 1px 2px rgba(0,0,0,.45),0 0 12px rgba(0,0,0,.35)}
+      .photo{width:100%;height:5cm;display:block;object-fit:cover;object-position:center;background:#eee}
+      @page{ size:A3 portrait; margin:1.5cm; }
+      @media print {
+        html, body { width: 297mm; height: 420mm; transform: scale(1); transform-origin: top left; }
       }
+     </style>
+    </head><body>
+      <div class="wrap">
+        <div class="header">
+          <div class="title-main">Fabric Swatch Collection</div>
+          <div class="subtle">${monthName} · ${year}</div>
+          <button id="printBtn" style="margin-top:8px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer">Print</button>
+        </div>
+        <div class="grid">${items || "<div class='subtle'>No swatches yet.</div>"}</div>
+      </div>
+      <script>
+        document.getElementById('printBtn').addEventListener('click', function(){ window.print(); });
+      </script>
+    </body></html>`;
 
-      function closeModal(){ $('#modal').classList.remove('open'); }
-
-      // 외부 클릭 닫기 + 프린트 버튼
-      document.addEventListener('click', function(e){
-        if (e.target && e.target.id === 'modal') closeModal();
-      });
-      var pb = document.getElementById('printBtn');
-      if (pb) pb.addEventListener('click', function(){ window.print(); });
-      window.onafterprint = closeModal;
-    </script>
-  </body></html>`;
-
-  const w = window.open("", "_blank");
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
-};
+    const w = window.open("", "_blank");
+    w.document.open(); w.document.write(html); w.document.close();
+  };
 
   return (
-  <div className="max-w-6xl mx-auto min-h-screen bg-[#f7f3ee] text-[#1b1b1b] px-10 py-12 font-sans">
-  {/* 헤더 */}
-  <header className="flex items-end justify-between pb-4 mb-10 border-b border-stone-300/60">
-    <h1 className="text-4xl sm:text-5xl leading-none tracking-tight font-semibold">
-      {new Date(year, month-1).toLocaleDateString("en-GB",{ month:"long" })} <span className="font-semibold">{year}</span>
-    </h1>
-    <div className="flex gap-2">
-      <button
-        className="px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
-        onClick={()=>{ if(month===1){ setYear(y=>y-1); setMonth(12);} else setMonth(m=>m-1); }}
-      >
-        Prev
-      </button>
-      <button
-        className="px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
-        onClick={()=>{ if(month===12){ setYear(y=>y+1); setMonth(1);} else setMonth(m=>m+1); }}
-      >
-        Next
-      </button>
-      <button
-        className="ml-2 px-5 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
-        onClick={printCollection}
-      >
-        View Swatch Book
-      </button>
-    </div>
-  </header>
+    <div className="max-w-6xl mx-auto min-h-screen bg-[#f7f3ee] text-[#1b1b1b] px-10 py-12 font-sans">
+      {/* 헤더 */}
+      <header className="flex items-end justify-between pb-4 mb-10 border-b border-stone-300/60">
+        <h1 className="text-4xl sm:text-5xl leading-none tracking-tight font-semibold">
+          {new Date(year, month-1).toLocaleDateString("en-GB",{ month:"long" })} <span className="font-semibold">{year}</span>
+        </h1>
+        <div className="flex gap-2 items-center">
+          <button
+            className="px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
+            onClick={()=>{ if(month===1){ setYear(y=>y-1); setMonth(12);} else setMonth(m=>m-1); }}
+          >Prev</button>
+          <button
+            className="px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
+            onClick={()=>{ if(month===12){ setYear(y=>y+1); setMonth(1);} else setMonth(m=>m+1); }}
+          >Next</button>
 
+          <button
+            className="ml-2 px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
+            onClick={printCollection}
+          >View Swatch Book</button>
 
-      {/* 달력 */}
-      {/* 요일 헤더 (잡지형: 레터스페이싱 넓게, 스몰캡 느낌) */}
-<div className="grid grid-cols-7 text-center text-[11px] tracking-wide text-stone-500 mb-2 font-medium">
-  {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d => <div key={d}>{d}</div>)}
-</div>
+          {/* JSON 백업/불러오기 */}
+          <button
+            className="ml-2 px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
+            onClick={exportJSON}
+          >Backup JSON</button>
 
-{/* 날짜 그리드 */}
-<div className="grid grid-cols-7 gap-3">
-  {cells.map((date,i)=>{
-    if(!date) return <div key={i} className="aspect-square bg-transparent" />;
+          <label className="px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition cursor-pointer">
+            Import JSON
+            <input type="file" accept="application/json" className="hidden" onChange={e=>{
+              const f = e.target.files?.[0]; if (f) importJSON(f);
+              e.target.value = "";
+            }}/>
+          </label>
 
-    const key = ymd(date);
-    const entry = (book || {})[key];
-    const isToday = ymd(new Date())===key;
-
-    return (
-      <div
-        key={i}
-        onClick={()=>setOpenDay(key)}
-        className={[
-          "relative group aspect-square rounded-[22px] overflow-hidden cursor-pointer",
-          "bg-white border border-stone-200/70 shadow-[0_1px_0_rgba(0,0,0,0.04)]",
-          "hover:shadow-[0_4px_16px_rgba(0,0,0,0.08)] hover:-translate-y-[2px] transition-all duration-200"
-        ].join(" ")}
-      >
-        {/* 날짜 (우상단, 작은 세리프 숫자) */}
-        <div className="absolute top-2 right-3 text-[11px] tracking-wide font-semibold text-stone-500">
-          {date.getDate()}
+          <button
+            className="px-4 py-2 rounded-full border border-red-200 text-red-700 text-[12px] tracking-wide hover:bg-red-50 transition"
+            onClick={()=>{
+              if (confirm("Would you like to reset all records? This action is irreversible.")) {
+                api.clearAll();
+                window.toast?.("All record deleted.", {variant:"info"});
+              }
+            }}
+          >Clear All</button>
         </div>
+      </header>
 
-        {/* 사진/플레이스홀더 */}
-        {entry?.photo ? (
-          <img
-            src={entry.photo}
-            alt=""
-            className="w-full h-full object-cover brightness-[0.96] group-hover:brightness-100 transition-all duration-200"
-          />
-        ) : (
-          <div className="flex items-center justify-center h-full text-stone-300 text-[12px] italic">
-          </div>
-        )}
-
-        {/* 하단 오버레이(그라데이션 + 무드 2개까지) */}
-        <div className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-[#1b1b1b]/70 to-transparent"></div>
-          <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
-            <div className="text-white text-[12px] leading-tight font-light">
-              {entry?.moods?.slice(0,2).map((m,i)=><div key={i}>{emojiOnly(m)}</div>)}
-            </div>
-            {/* 상태 점: 스와치/포토 */}
-            <div className="flex gap-1">
-              {entry?.swatchSVG ? <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/90"></span> : null}
-              {entry?.photo ? <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/50"></span> : null}
-            </div>
-          </div>
-        </div>
-
-        {/* 오늘 강조 (미세한 링) */}
-        {isToday && (
-          <div className="absolute inset-0 rounded-[22px] ring-2 ring-stone-900/35 pointer-events-none"></div>
-        )}
+      {/* 요일 헤더 */}
+      <div className="grid grid-cols-7 text-center text-[11px] tracking-wide text-stone-500 mb-2 font-medium">
+        {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d => <div key={d}>{d}</div>)}
       </div>
-    );
-  })}
-</div>
 
+      {/* 날짜 그리드 */}
+      <div className="grid grid-cols-7 gap-3">
+        {cells.map((date,i)=>{
+          if(!date) return <div key={i} className="aspect-square bg-transparent" />;
+          const key = ymd(date);
+          const entry = (book || {})[key];
+          const isToday = ymd(new Date())===key;
 
- {openDay && (
-  <DetailPanel
-  day={openDay}
-  entry={book[openDay] || emptyEntry()}
-  onClose={() => setOpenDay(null)}
-  onSave={async (localData) => {
-    const toSave = await normalizeEntryBeforeSave(openDay, localData);
-    await bookApi.saveDay(openDay, toSave);           // ← bookApi 사용
-    window.toast?.("OOTD saved!", { variant: "ok" });
-  }}
-  onDelete={async () => {
-    await bookApi.deleteDay(openDay);
-    window.toast?.("Record reset.");
-    setOpenDay(null);
-  }}
-  onMakeSwatch={async (payload) => {
-    // 스와치가 큰 문자열이면 저장 전에 업로드로 치환
-    let data = { ...payload };
-    if (data.swatchSVG && data.swatchSVG.length > 4000) {
-      data.swatchSVG = await uploadText(`swatches/${openDay}.svg`, data.swatchSVG);
-    }
-    const cur = book[openDay] || emptyEntry();
-    await bookApi.saveDay(openDay, { ...cur, ...data });
-  }}
-/>
+          return (
+            <div
+              key={i}
+              onClick={()=>setOpenDay(key)}
+              className={[
+                "relative group aspect-square rounded-[22px] overflow-hidden cursor-pointer",
+                "bg-white border border-stone-200/70 shadow-[0_1px_0_rgba(0,0,0,0.04)]",
+                "hover:shadow-[0_4px_16px_rgba(0,0,0,0.08)] hover:-translate-y-[2px] transition-all duration-200"
+              ].join(" ")}
+            >
+              <div className="absolute top-2 right-3 text-[11px] tracking-wide font-semibold text-stone-500">
+                {date.getDate()}
+              </div>
 
-)}
+              {entry?.photo ? (
+                <img
+                  src={entry.photo}
+                  alt=""
+                  className="w-full h-full object-cover brightness-[0.96] group-hover:brightness-100 transition-all duration-200"
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-stone-300 text-[12px] italic">
+                </div>
+              )}
+
+              <div className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-[#1b1b1b]/70 to-transparent"></div>
+                <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
+                  <div className="text-white text-[12px] leading-tight font-light">
+                    {entry?.moods?.slice(0,2).map((m,i)=><div key={i}>{emojiOnly(m)}</div>)}
+                  </div>
+                  <div className="flex gap-1">
+                    {entry?.swatchSVG ? <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/90"></span> : null}
+                    {entry?.photo ? <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/50"></span> : null}
+                  </div>
+                </div>
+              </div>
+
+              {isToday && (
+                <div className="absolute inset-0 rounded-[22px] ring-2 ring-stone-900/35 pointer-events-none"></div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {openDay && (
+        <DetailPanel
+          day={openDay}
+          entry={book[openDay] || emptyEntry()}
+          onClose={() => setOpenDay(null)}
+          onSave={(localData) => {
+            // 저장 시 스와치 잠금 옵션 유지
+            api.saveDay(openDay, { ...localData });
+            window.toast?.("Saved successfully!", {variant:"ok"});
+          }}
+          onDelete={() => {
+            api.deleteDay(openDay);
+            window.toast?.("Record deleted.", {variant:"info"});
+            setOpenDay(null);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 /* ===== 상세 패널 ===== */
-function DetailPanel({day,entry,onClose,onSave,onDelete,onMakeSwatch}){
+function DetailPanel({day,entry,onClose,onSave,onDelete}){
   const [local,setLocal]=React.useState(entry);
   const [matType,setMatType]=React.useState(entry.matType||"auto");
   const [strength,setStrength]=React.useState(entry.strength ?? 60);
+
+  // 저장 후 스와치가 바뀌지 않게 잠금
+  const [swatchLocked, setSwatchLocked] = React.useState(!!entry.swatchLocked);
+
   const MOODS=["😊 happiness","😌 cozy","💖 romantic","⚡ concentration","✨ inspiration","😴 tired","😡 anger", "😭 sad", "😔 loneliness", "🌞 sunny","☁️ cloudy","🌧️ rainy", "☃️ snowy"];
 
   const toggleMood=m=>setLocal(prev=>{
-    const has=prev.moods.indexOf(m)>=0;
-    return {...prev,moods:has?prev.moods.filter(x=>x!==m):[...prev.moods,m]};
+    const has=prev.moods?.includes(m);
+    return {...prev,moods:has?prev.moods.filter(x=>x!==m):[...prev.moods||[],m]};
   });
 
-  // 사진 업로드 → 자동 팔레트 추출 & (auto면) 자동 소재 인식 + 스와치 생성
-  // 사진 업로드 → Storage에 업로드 후 URL만 보관
-const onPhotoSelected = (file) => {
-  if (!file) return;
-  const r = new FileReader();
-  r.onload = async () => {
-    try {
-      // 1) 다운스케일 + jpeg (이미 가지고 있는 함수 사용)
-      const jpegData = await fileToDownscaledJPEG(file, 1200, 0.85);
+  // 사진 업로드 → 팔레트 추출 (로컬 dataURL 저장)
+  const onPhotoSelected = (rawFile) => {
+    if (!rawFile) return;
+    (async ()=>{
+      try {
+        const jpegData = await fileToDownscaledJPEG(rawFile, 700, 0.5);
+        if (dataUrlBytes(jpegData) > 800_000) {
+          alert("The photo size is large and may cause storage issues. Please use a smaller photo.");
+        }
 
-      // 2) 팔레트 뽑기
-      const img = await new Promise((resolve, reject) => {
-        const im = new Image();
-        im.onload = () => resolve(im);
-        im.onerror = reject;
-        im.src = jpegData;
-      });
-      const palette = quantizeColorsFromImg(img, 4);
+        const img = await new Promise((res, rej) => {
+          const im = new Image();
+          im.onload = () => res(im);
+          im.onerror = () => rej(new Error("Image load failed"));
+          im.src = jpegData;
+        });
+        const palette = quantizeColorsFromImg(img, 4);
 
-      // 3) Storage 업로드 (경로: photos/YYYY-MM-DD.jpg)
-      const path = `photos/${day}.jpg`;
-      const photoURL = await uploadDataURL(path, jpegData);
-
-      // 4) 상태 업데이트 (URL만 저장)
-      setLocal(prev => ({ ...prev, photo: photoURL, palette }));
-
-      // 5) auto면 임시 타입 추정 & 미리보기
-      if (matType === "auto") {
-        const t = guessMaterialFromImg(img);
-        const colors = (local.manualColors?.length ? local.manualColors : palette);
-        const svg = makeSwatch(t, colors, Number(strength));
-        setLocal(prev => ({ ...prev, matType: t, swatchSVG: svg }));
+        // auto면 미리보기만(잠금이 아닐 때만) 생성
+        let next = { ...local, photo: jpegData, palette };
+        if (!swatchLocked && matType === "auto") {
+          const t = guessMaterialFromImg(img);
+          const colors = (next.manualColors?.length ? next.manualColors : palette) || palette;
+          const svg = makeSwatch(t, colors, Number(strength));
+          next = { ...next, matType: t, swatchSVG: svg };
+          setMatType(t); // auto → 추정값으로 고정
+        }
+        setLocal(next);
+        window.toast?.("The picture is reflected", {variant:"ok"});
+      } catch (err) {
+        console.error(err);
+        alert("Image processing failure");
       }
-    } catch (err) {
-      console.error("Image upload error:", err);
-      alert("Image upload failed. Try again.");
-    }
+    })();
   };
-  r.readAsDataURL(file);
-};
 
-
-  // 수동 색상 (있으면 사진 팔레트보다 우선)
+  // 수동 색상
   const addManualColor = ()=>{
     setLocal(prev=>{
       const arr=[...(prev.manualColors||[])];
       if(arr.length>=6) return prev;
       arr.push("#cccccc");
-      // 수동색 추가 시 즉시 미리보기 업데이트
-      const colors = arr;
-      if(colors && (prev.matType||"auto")!=="auto"){
-        const svg=makeSwatch(prev.matType, colors, Number(strength));
+      // 잠금이 아니고 type 고정된 경우, 미리보기 갱신
+      if(!swatchLocked && (matType!=="auto")){
+        const svg=makeSwatch(matType, arr, Number(strength));
         return {...prev, manualColors:arr, swatchSVG:svg};
       }
       return {...prev, manualColors:arr};
@@ -867,58 +672,76 @@ const onPhotoSelected = (file) => {
     setLocal(prev=>{
       const arr=[...(prev.manualColors||[])];
       arr[idx]=val;
-      const type = prev.matType==="auto" ? "plain" : prev.matType; // auto면 임시로 plain에 반영
-      const colors = arr.length>0 ? arr : (prev.palette||[]);
-      const svg = (type!=="auto" && colors.length) ? makeSwatch(type, colors, Number(strength)) : prev.swatchSVG;
-      return {...prev, manualColors:arr, swatchSVG:svg};
+      if(!swatchLocked && (matType!=="auto")){
+        const colors = arr.length>0 ? arr : (prev.palette||[]);
+        const svg = colors.length ? makeSwatch(matType, colors, Number(strength)) : prev.swatchSVG;
+        return {...prev, manualColors:arr, swatchSVG:svg};
+      }
+      return {...prev, manualColors:arr};
     });
   };
   const removeManualColor = (idx)=>{
     setLocal(prev=>{
       const arr=[...(prev.manualColors||[])];
       arr.splice(idx,1);
-      const type = prev.matType==="auto" ? "plain" : prev.matType;
-      const colors = arr.length>0 ? arr : (prev.palette||[]);
-      const svg = (type!=="auto" && colors.length) ? makeSwatch(type, colors, Number(strength)) : prev.swatchSVG;
-      return {...prev, manualColors:arr, swatchSVG:svg};
+      if(!swatchLocked && (matType!=="auto")){
+        const colors = arr.length>0 ? arr : (prev.palette||[]);
+        const svg = colors.length ? makeSwatch(matType, colors, Number(strength)) : prev.swatchSVG;
+        return {...prev, manualColors:arr, swatchSVG:svg};
+      }
+      return {...prev, manualColors:arr};
     });
   };
   const clearManualColors = ()=>{
     setLocal(prev=>{
       const colors = prev.palette||[];
-      const type = prev.matType==="auto" ? "plain" : prev.matType;
-      const svg = (type!=="auto" && colors.length) ? makeSwatch(type, colors, Number(strength)) : null;
-      return {...prev, manualColors:[], swatchSVG:svg};
+      if(!swatchLocked && (matType!=="auto")){
+        const svg = colors.length ? makeSwatch(matType, colors, Number(strength)) : null;
+        return {...prev, manualColors:[], swatchSVG:svg};
+      }
+      return {...prev, manualColors:[]};
     });
   };
 
-  // 타입/강도 변경 시 미리보기 (수동색>팔레트 우선)
+  // 타입/강도 변경 시: 잠금이 아닐 때만 즉시 미리보기
   React.useEffect(()=>{
+    if (swatchLocked) return;
     const colors = (local.manualColors?.length>0 ? local.manualColors : local.palette);
     if(colors && matType!=="auto"){
       const svg=makeSwatch(matType, colors, Number(strength));
       setLocal(prev=>({...prev, swatchSVG:svg }));
     }
-  },[matType,strength]); // eslint-disable-line
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[matType,strength]);
 
-  // 스와치 생성 버튼
+  // 스와치 생성 버튼 (이때 잠금 켬)
   const generateSwatch=()=>{
     const colors = (local.manualColors?.length>0 ? local.manualColors : local.palette) || ["#d0d0d0","#a0a0a0","#808080","#e5e5e5"];
     let type=matType;
     if(type==="auto"){
-      if(!local.photo){ alert("사진을 먼저 올려줘!"); return; }
+      if(!local.photo){ alert("Upload a photo"); return; }
       const img=new Image();
       img.onload=()=>{
         type=guessMaterialFromImg(img);
         const svg=makeSwatch(type, colors, Number(strength));
         setMatType(type);
         setLocal(prev=>({...prev, matType:type, swatchSVG:svg }));
+        setSwatchLocked(true);
+        window.toast?.("created and fixed a swatch.", {variant:"ok"});
       };
       img.src=local.photo;
       return;
     }
     const svg=makeSwatch(type, colors, Number(strength));
     setLocal(prev=>({...prev, swatchSVG:svg }));
+    setSwatchLocked(true);
+    window.toast?.("created and fixed a swatch.", {variant:"ok"});
+  };
+
+  // 잠금 해제
+  const unlockSwatch = ()=>{
+    setSwatchLocked(false);
+    window.toast?.("The swatch has been unlocked. It can be changed again if you edit it.", {variant:"info"});
   };
 
   return (
@@ -930,7 +753,10 @@ const onPhotoSelected = (file) => {
             <h3 className="text-xl font-semibold">Today's record</h3>
           </div>
           <div className="flex gap-2">
-            <button className="px-3 py-2 rounded-xl border" onClick={()=>onSave(local)}>Save</button>
+            <button
+              className="px-3 py-2 rounded-xl border"
+              onClick={()=>onSave({ ...local, matType, strength, swatchLocked })}
+            >Save</button>
             <button className="px-3 py-2 rounded-xl bg-stone-900 text-white" onClick={onClose}>Close</button>
           </div>
         </div>
@@ -941,7 +767,7 @@ const onPhotoSelected = (file) => {
             <label className="block text-sm font-medium mb-2">Note</label>
             <textarea rows={4}
               className="w-full rounded-xl border p-3 outline-none focus:ring-2 focus:ring-stone-300"
-              value={local.notes}
+              value={local.notes||""}
               onChange={e=>setLocal({...local, notes:e.target.value})}
               placeholder="ex: It’s date day! I wanna look pretty today!"/>
           </section>
@@ -958,75 +784,52 @@ const onPhotoSelected = (file) => {
             </div>
           </section>
 
+          {/* 사진 */}
           <section>
-  <h4 className="text-sm font-medium mb-2">OOTD</h4>
+            <h4 className="text-sm font-medium mb-2">OOTD</h4>
+            {local.photo ? (
+              <img src={local.photo} alt="outfit" className="w-full rounded-xl border object-cover" />
+            ) : null}
+            <label className="inline-flex items-center gap-2 mt-3 px-4 py-2 border rounded-xl cursor-pointer hover:bg-stone-50">
+              <span>{local.photo ? "Upload Again" : "Choose File"}</span>
+              <span className="text-sm text-stone-500">{local.photo ? "File selected" : "No file chosen"}</span>
+              <input
+                type="file"
+                accept="image/jpeg,image/jpg,image/png"
+                className="hidden"
+                onChange={e=>{ const f=e.target.files?.[0]; if(f) onPhotoSelected(f); e.target.value=""; }}
+              />
+            </label>
+            <div className="text-xs text-stone-500 mt-1">* Except for HEIC. Change the iPhone camera settings to JPEG.</div>
+          </section>
 
-   {local.photo ? (
-    <img src={local.photo} alt="outfit" className="w-full rounded-xl border object-cover" />
-  ) : null}
-
-  <label className="inline-flex items-center gap-2 mt-3 px-4 py-2 border rounded-xl cursor-pointer hover:bg-stone-50">
-    <span> {local.photo ? "Upload Again" : "Choose File"}</span>
-    <span className="text-sm text-stone-500">{local.photo ? "File selected" : "No file chosen"}</span>
-
-  <input
-  type="file"
-  accept="image/jpeg,image/jpg,image/png,image/heic,image/heif,.heic,.heif,.HEIC,.HEIF"
-  className="hidden"
-  onChange={async (e) => {
-    const raw = e.target.files?.[0];
-    if (!raw) return;
-
-    try {
-      // 1) HEIC이면 JPEG 파일로 변환
-      const file = await ensureJpegFile(raw);
-
-      // 2) 다운스케일 & 미리보기용 dataURL 만들기
-      const jpegData = await fileToDownscaledJPEG(file, 1200, 0.85);
-
-      // 3) 팔레트 추출 (dataURL로만 처리)
-      const img = await new Promise((res, rej) => {
-        const im = new Image();
-        im.onload = () => res(im);
-        im.onerror = () => rej(new Error("Image load failed"));
-        im.src = jpegData;
-      });
-      const palette = quantizeColorsFromImg(img, 4);
-
-      // 4) Storage 업로드 → HTTPS URL만 저장
-      const path = `photos/${day}.jpg`;
-      const photoURL = await uploadDataURL(path, jpegData);
-
-      // 5) 상태 갱신 (URL + 팔레트)
-      setLocal((prev) => ({ ...prev, photo: photoURL, palette }));
-
-      // 6) auto면 임시 소재 추정 + 스와치 미리보기
-      if (matType === "auto") {
-        const t = guessMaterialFromImg(img);
-        const colors = (prev?.manualColors?.length ? prev.manualColors : palette) ?? palette;
-        const svg = makeSwatch(t, colors, Number(strength));
-        setLocal((prev) => ({ ...prev, matType: t, swatchSVG: svg }));
-      }
-    } catch (err) {
-      console.error("upload error:", err);
-      alert("이미지 업로드에 실패했어요. 다시 시도해 주세요.");
-    }
-  }}
-/>
-
-
-  </label>
-</section>
-
-          {/* 수동 색상 */}
+          {/* 스와치 */}
           <section>
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-medium">Swatch</h4>
               <div className="flex gap-2">
-                <button className="px-3 py-2 rounded-xl border hover:bg-stone-50" onClick={addManualColor}>+ manual color</button>
-                <button className="px-3 py-2 rounded-xl border hover:bg-stone-50" onClick={clearManualColors}>reset manual color</button>
+                <button className="px-3 py-2 rounded-xl border hover:bg-stone-50" onClick={()=>{
+                  const arr=[...(local.manualColors||[])];
+                  if(arr.length>=6) return;
+                  arr.push("#cccccc");
+                  setLocal(prev=>({...prev, manualColors:arr}));
+                  if(!swatchLocked && (matType!=="auto")){
+                    const svg=makeSwatch(matType, arr, Number(strength));
+                    setLocal(prev=>({...prev, manualColors:arr, swatchSVG:svg}));
+                  }
+                }}>+ manual color</button>
+                <button className="px-3 py-2 rounded-xl border hover:bg-stone-50" onClick={()=>{
+                  const colors = local.palette||[];
+                  if(!swatchLocked && (matType!=="auto")){
+                    const svg = colors.length ? makeSwatch(matType, colors, Number(strength)) : null;
+                    setLocal(prev=>({...prev, manualColors:[], swatchSVG:svg}));
+                  } else {
+                    setLocal(prev=>({...prev, manualColors:[]}));
+                  }
+                }}>reset manual color</button>
               </div>
             </div>
+
             {/* 자동 팔레트 미리보기 */}
             <div className="mt-3">
               <div className="text-xs text-stone-500 mb-1">automatic color extraction palette</div>
@@ -1036,9 +839,10 @@ const onPhotoSelected = (file) => {
                 )}
               </div>
             </div>
+
             {/* 수동 색상 피커 */}
             <div className="mt-3">
-              <div className="text-xs text-stone-500 mb-1">color picker (takes priority if set) </div>
+              <div className="text-xs text-stone-500 mb-1">color picker (takes priority if set)</div>
               <div className="flex flex-wrap gap-2">
                 {(local.manualColors||[]).map((c,i)=>(
                   <div key={i} className="flex items-center gap-1">
@@ -1072,8 +876,16 @@ const onPhotoSelected = (file) => {
               </select>
               <input type="range" min="0" max="100" value={strength}
                 onChange={e=>setStrength(e.target.value)} className="w-32"/>
-              <button className="px-3 py-2 rounded-xl border hover:bg-stone-50"
-                onClick={generateSwatch}>create a swatch</button>
+              <button className="px-3 py-2 rounded-xl border hover:bg-stone-50" onClick={generateSwatch}>
+                create a swatch
+              </button>
+
+              {swatchLocked ? (
+                <button className="px-3 py-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-800"
+                        onClick={unlockSwatch}>unlock</button>
+              ) : (
+                <span className="text-xs text-stone-500"></span>
+              )}
             </div>
 
             <div className="mt-3">
@@ -1092,13 +904,13 @@ const onPhotoSelected = (file) => {
           </div>
         </div>
       </div>
+
       <button className="absolute right-[max(24rem,40%)] top-4 bg-white p-2 rounded-xl shadow" onClick={onClose}>✕</button>
     </div>
   );
 }
 
-/* ===== 부트스트랩 ===== */
-// ===[3. 에러 바운더리]==============================================
+/* ===== 에러 바운더리 및 부트스트랩 ===== */
 class ErrorBoundary extends React.Component {
   constructor(p){ super(p); this.state = { error: null }; }
   static getDerivedStateFromError(err){ return { error: err }; }
@@ -1108,14 +920,14 @@ class ErrorBoundary extends React.Component {
         <div className="p-6">
           <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
             <b>렌더 오류</b><br />
-            저장 데이터나 이미지 때문에 오류가 났을 수 있어요.
+            An error may have occurred due to saved data or images. The swatch has been unlocked. It may change again if you edit it.
             <div className="mt-3 flex gap-2">
               <button className="px-3 py-2 border rounded-lg" onClick={()=>location.reload()}>
                 새로고침
               </button>
               <button
                 className="px-3 py-2 border rounded-lg"
-                onClick={() => { localStorage.removeItem("coordination_book_v4"); location.reload(); }}>
+                onClick={() => { localStorage.removeItem("coordination_book_v5"); location.reload(); }}>
                 저장데이터 초기화
               </button>
             </div>
@@ -1127,8 +939,6 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-
-// ✅ 아래 두 줄이 진짜 중요함
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
   <ErrorBoundary>

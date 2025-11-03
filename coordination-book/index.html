@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Fabric Swatch Collection</title>
+  <title>Coordination Book (Local)</title>
 
-  <!-- Tailwind (스타일) -->
+  <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- React 18 + ReactDOM -->
+  <!-- React / ReactDOM -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
 
-  <!-- Babel (브라우저에서 JSX 컴파일) -->
+  <!-- Babel -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <style>
@@ -23,56 +23,12 @@
       background:#F5F2EE;
     }
   </style>
-
-<!-- index.html: Firebase 초기화 (app.jsx보다 위!) -->
-<script type="module">
-  // Firebase v12 모듈
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
-  import { getFirestore, doc, getDoc, setDoc, onSnapshot } 
-    from "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js";
-  import { getAuth, signInAnonymously } 
-    from "https://www.gstatic.com/firebasejs/12.5.0/firebase-auth.js";
-  <!-- ⭐⭐ 새로 추가: Storage SDK -->
-  import { getStorage, ref as sref, uploadString, uploadBytes, getDownloadURL }
-    from "https://www.gstatic.com/firebasejs/12.5.0/firebase-storage.js";
-
-  const firebaseConfig = {
-    apiKey: "AIzaSyDJbRAuqHhFQsHGgam-xeRFxOcxA9awTqM",
-    authDomain: "coordination-book.firebaseapp.com",
-    projectId: "coordination-book",
-    storageBucket: "coordination-book.appspot.com",
-    messagingSenderId: "139328147409",
-    appId: "1:139328147409:web:b99eca7b99393a92249af0",
-    measurementId: "G-F72EJY2TNK"
-  };
-
-  if (!window._fb) {
-    const app  = initializeApp(firebaseConfig);
-    const db   = getFirestore(app);
-    const auth = getAuth(app);
-    const st   = getStorage(app);                 // ⭐ Storage 핸들
-
-    // 전역 주입
-    window._fb    = { app, db, auth, st };
-    window._fbFns = { doc, getDoc, setDoc, onSnapshot, sref, uploadString, uploadBytes, getDownloadURL };
-
-    // 익명 로그인
-    signInAnonymously(auth).catch(e => console.error("Anon sign-in error:", e));
-  }
-</script>
-
-
-
-
-<!-- HEIC -> JPEG 변환 (UMD, window.heic2any 로 노출) -->
-<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
-
-  <!-- ✅ 앱 코드 불러오기 (네가 만든 app.jsx 파일) -->
-  <script type="text/babel" data-presets="react" src="./app.jsx"></script>
-
 </head>
 
 <body>
   <div id="root"></div>
+
+  <!-- ✅ Local-only version -->
+  <script type="text/babel" data-presets="react" src="./app.jsx"></script>
 </body>
 </html>
