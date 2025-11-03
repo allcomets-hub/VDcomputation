@@ -24,20 +24,17 @@
     }
   </style>
 
+<!-- index.html: Firebase 초기화 (app.jsx보다 위!) -->
 <script type="module">
+  // Firebase v12 모듈
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
-  import {
-    getFirestore, doc, getDoc, setDoc, onSnapshot,
-    collection, getDocs, deleteField    /* ⬅️ 추가 */
-  } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js";
-  import { getAuth, signInAnonymously }
+  import { getFirestore, doc, getDoc, setDoc, onSnapshot } 
+    from "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js";
+  import { getAuth, signInAnonymously } 
     from "https://www.gstatic.com/firebasejs/12.5.0/firebase-auth.js";
-
-  /* ✅ NEW: Storage SDK 추가 */
-  import {
-    getStorage, ref as sref, uploadString, uploadBytes, getDownloadURL
-  } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-storage.js";
-
+  <!-- ⭐⭐ 새로 추가: Storage SDK -->
+  import { getStorage, ref as sref, uploadString, uploadBytes, getDownloadURL }
+    from "https://www.gstatic.com/firebasejs/12.5.0/firebase-storage.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyDJbRAuqHhFQsHGgam-xeRFxOcxA9awTqM",
@@ -49,24 +46,21 @@
     measurementId: "G-F72EJY2TNK"
   };
 
-    if (!window._fb) {
+  if (!window._fb) {
     const app  = initializeApp(firebaseConfig);
     const db   = getFirestore(app);
     const auth = getAuth(app);
-    const st   = getStorage(app);            // ⬅️ 추가
+    const st   = getStorage(app);                 // ⭐ Storage 핸들
 
-    window._fb    = { app, db, auth, st };   // ⬅️ st 포함
-    window._fbFns = {
-      // Firestore
-      doc, getDoc, setDoc, onSnapshot,
-      collection, getDocs, deleteField,
-      // Storage
-      sref, uploadString, uploadBytes, getDownloadURL
-    };
+    // 전역 주입
+    window._fb    = { app, db, auth, st };
+    window._fbFns = { doc, getDoc, setDoc, onSnapshot, sref, uploadString, uploadBytes, getDownloadURL };
 
+    // 익명 로그인
     signInAnonymously(auth).catch(e => console.error("Anon sign-in error:", e));
   }
 </script>
+
 
 
 

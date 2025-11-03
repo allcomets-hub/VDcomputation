@@ -35,10 +35,10 @@ async function uploadDataURL(path, dataUrl) {
   const F  = window._fbFns;    // { sref, uploadString, getDownloadURL }
   if (!FB?.st) throw new Error("Storage not ready");
   const r = F.sref(FB.st, path);
-  // data_url로 바로 업로드
   await F.uploadString(r, dataUrl, "data_url");
   return await F.getDownloadURL(r);
 }
+
 
 async function uploadText(path, text) {
   const FB = window._fb;
@@ -973,44 +973,52 @@ const onPhotoSelected = (file) => {
   type="file"
   accept="image/jpeg,image/jpg,image/png,image/heic,image/heif,.heic,.heif,.HEIC,.HEIF"
   className="hidden"
-  onChange={async (e) => {
-    const raw = e.target.files?.[0];
-    if (!raw) return;
+onChange={async (e) => {
+  const raw = e.target.files?.[0];
+  if (!raw) return;
 
-    try {
-      // 1) HEIC면 JPEG 파일로 먼저 변환
-      const jpegFile = await ensureJpegFile(raw);
+  // 1) HEIC -> JPEG 파일 보정
+  let file;
+  try {
+    file = await ensureJpegFile(raw);
+  } catch {
+    alert("HEIC 변환 실패. JPG/PNG로 다시 시도해 주세요.");
+    return;
+  }
 
-      // 2) 다운스케일 → dataURL
-      const jpegData = await fileToDownscaledJPEG(jpegFile, 1200, 0.85);
+  try {
+    // 2) 다운스케일 & dataURL 생성
+    const jpegData = await fileToDownscaledJPEG(file, 1200, 0.85);
 
-      // 3) 팔레트 추출
-      const img = await new Promise((res, rej) => {
-        const im = new Image();
-        im.onload = () => res(im);
-        im.onerror = rej;
-        im.src = jpegData;
-      });
-      const palette = quantizeColorsFromImg(img, 4);
+    // (팔레트는 로컬 dataURL로 추출)
+    const img = await new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => res(im);
+      im.onerror = rej;
+      im.src = jpegData;
+    });
+    const palette = quantizeColorsFromImg(img, 4);
 
-      // 4) Storage 업로드 → URL만 보관
-      const photoURL = await uploadDataURL(`photos/${day}.jpg`, jpegData);
+    // 3) Storage 업로드 후 URL만 보관  ⭐⭐
+    const path = `photos/${day}.jpg`;
+    const photoURL = await uploadDataURL(path, jpegData);
 
-      // 5) 상태 반영 (URL + 팔레트)
-      setLocal((prev) => ({ ...prev, photo: photoURL, palette }));
+    // 4) 상태 갱신 (URL + 팔레트)
+    setLocal(prev => ({ ...prev, photo: photoURL, palette }));
 
-      // 6) 자동 소재면 미리보기 생성
-      if (matType === "auto") {
-        const t = guessMaterialFromImg(img);
-        const colors = (local.manualColors?.length ? local.manualColors : palette);
-        const svg = makeSwatch(t, colors, Number(strength));
-        setLocal(prev => ({ ...prev, matType: t, swatchSVG: svg }));
-      }
-    } catch (err) {
-      console.error(err);
-      alert("이미지 처리에 실패했어요. 다른 파일로 다시 시도해 주세요.");
+    // 5) auto면 잠정 타입 추정 + 미리보기
+    if (matType === "auto") {
+      const t = guessMaterialFromImg(img);
+      const colors = (prev?.manualColors?.length ? prev.manualColors : palette);
+      const svg = makeSwatch(t, colors, Number(strength));
+      setLocal(prev => ({ ...prev, matType: t, swatchSVG: svg }));
     }
-  }}
+  } catch (err) {
+    console.error(err);
+    alert("이미지 업로드에 실패했어요.");
+  }
+}}
+
 />
 
   </label>
