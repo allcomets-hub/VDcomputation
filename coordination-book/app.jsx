@@ -465,6 +465,9 @@ const entries = Object.entries(book || {})
     .colors{display:flex;gap:6px;margin-top:6px}
     .c{width:18px;height:18px;border-radius:6px;border:1px solid #ddd}
     @page{ size:A3 portrait; margin:1.5cm; }
+    @media print {
+  html, body { width: 297mm; height: 420mm; transform: scale(1); transform-origin: top left; }
+}
     @media print{ .modal{display:none!important} .wrap{padding:0} .grid{gap:0.6cm} }
    </style>
   </head><body>
@@ -554,7 +557,6 @@ const entries = Object.entries(book || {})
         View Swatch Book
       </button>
     </div>
-    <DemoButtons book={book} saveBook={saveBook} />
   </header>
 
 
@@ -630,27 +632,35 @@ const entries = Object.entries(book || {})
   day={openDay}
   entry={book[openDay]||emptyEntry()}
   onClose={()=>setOpenDay(null)}
-  onSave={async (u)=>{
-    // 🔹 스와치가 문자열(로컬)이라면 Storage에 저장하고 URL만 남김
-    let toSave = { ...u };
-    try {
-      if (u.swatchSVG && u.swatchSVG.startsWith("<svg")) {
-        const svgURL = await uploadText(`swatches/${openDay}.svg`, u.swatchSVG);
-        toSave = { ...u, swatchSVG: svgURL };  // 🔁 URL로 치환
-      }
-    } catch (e) {
-      console.warn("Swatch upload failed, keep inline svg:", e);
-      // 실패하면 그냥 인라인 SVG로 둬도 되지만 문서가 커질 수 있음
+  onSave={async (u) => {
+  // 1) 스와치가 인라인 SVG면 Storage에 올리고 URL로 치환
+  let toSave = { ...u };
+  try {
+    if (u.swatchSVG && typeof u.swatchSVG === "string" && u.swatchSVG.startsWith("<svg")) {
+      const svgURL = await uploadText(`swatches/${openDay}.svg`, u.swatchSVG);
+      toSave = { ...u, swatchSVG: svgURL };
     }
+  } catch (e) {
+    console.warn("Swatch upload failed, keep inline svg:", e);
+  }
 
-    // 🔹 Firestore에 저장
-    const next = { ...(book||{}), [openDay]: toSave };
-    await saveBook(next);
-    setOpenDay(null);
-  }}
-  onDelete={()=>{
-    const n = { ...(book||{}) }; delete n[openDay]; saveBook(n);
-  }}
+  // 2) Firestore 저장
+  const next = { ...(book || {}), [openDay]: toSave };
+  await saveBook(next);
+
+  // 3) 알림 + 자동 닫기
+  alert("OOTD saved successfully!");
+  setOpenDay(null);
+}}
+
+  onDelete={() => {
+  const n = { ...(book || {}) };
+  delete n[openDay];
+  saveBook(n);
+  alert("Record deleted successfully!");
+  setOpenDay(null);
+}}
+
   onMakeSwatch={(payload)=>{ updateDay(openDay, cur => ({...cur, ...payload})); }}
 />
 
@@ -998,40 +1008,6 @@ class ErrorBoundary extends React.Component {
     }
     return this.props.children;
   }
-}
-
-// === Demo buttons: 샘플 데이터 주입 ===
-function DemoButtons({book, saveBook}) {
-  const inject = () => {
-    const now = new Date();
-    const k1 = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-08`;
-    const k2 = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-09`;
-    const make = (note) => ({
-      notes: note,
-      photo: null,
-      moods: ["😊 happiness","✨ inspiration"],
-      palette: ["#d98aa8","#5c6ea8","#e9d9d1","#2b2b2b"],
-      manualColors: [],
-      matType: "twill",
-      strength: 60,
-      swatchSVG: makeSwatch("twill", ["#d98aa8","#5c6ea8","#e9d9d1","#2b2b2b"], 60)
-    });
-    const next = {...(book||{}), [k1]: make("sample A"), [k2]: make("sample B")};
-    saveBook(next);
-    alert("샘플 2개를 추가했어요!");
-  };
-
-  const clearAll = () => {
-    if (!confirm("모든 기록을 지울까요?")) return;
-    saveBook({});
-  };
-
-  return (
-    <div className="flex gap-2">
-      <button className="px-3 py-2 rounded-full border" onClick={inject}>샘플 넣기</button>
-      <button className="px-3 py-2 rounded-full border" onClick={clearAll}>전체 삭제</button>
-    </div>
-  );
 }
 
 // ✅ 아래 두 줄이 진짜 중요함
