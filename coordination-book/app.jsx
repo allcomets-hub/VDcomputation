@@ -1,43 +1,38 @@
 /* =========================================================
-   Coordination Book (Local-Only)
-   - Firebase/Storage 완전 제거
-   - 사진/팔레트/스와치/이모지/메모
-   - JSON 백업/불러오기
-   - 프린트(스와치 북)
-   - HEIC 변환 X, "양털" 타입 없음
-   - 저장 후 스와치 고정(lock) 옵션 적용
+   Coordination Book (Local-Only, Big Storage)
+   - No Firebase. No Storage.
+   - Photos saved into IndexedDB (tens~hundreds possible)
+   - Metadata stays in localStorage
+   - WebP + second-pass shrink to cap file size
+   - Palette/Swatch/Emojis/Notes
+   - JSON Backup/Import (metadata only)
+   - Print (Swatch Book)
+   - No "fleece" type
+   - Swatch lock (prevent auto-changing after save)
+   - All alerts/toasts in English
    ========================================================= */
 
-/* ===== 공용 유틸 ===== */
+/* ========== Small Utils ========== */
 const pad = n => String(n).padStart(2,'0');
 const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const range = n => Array.from({length:n},(_,i)=>i);
 const formatDateDMY = (value) =>
-  new Date(value).toLocaleDateString("en-GB", {
-    day: "numeric", month: "short", year: "numeric",
-  });
+  new Date(value).toLocaleDateString("en-GB", { day:"numeric", month:"short", year:"numeric" });
 
 const dataUrlBytes = (dataUrl) => {
   const b64 = (dataUrl||'').split(",")[1] || "";
   return Math.floor(b64.length * 0.75);
 };
 
-/* ===== Tiny toast ===== */
+/* ========== Tiny Toast ========== */
 (function setupToast() {
   if (document.getElementById("toast-root")) return;
-
   const root = document.createElement("div");
   root.id = "toast-root";
   Object.assign(root.style, {
-    position: "fixed",
-    inset: "0 auto auto 0",
-    left: 0,
-    right: 0,
-    top: "14px",
-    display: "flex",
-    justifyContent: "center",
-    pointerEvents: "none",
-    zIndex: 9999
+    position: "fixed", left: 0, right: 0, top: "14px",
+    display: "flex", justifyContent: "center",
+    pointerEvents: "none", zIndex: 9999
   });
   document.body.appendChild(root);
 
@@ -47,55 +42,89 @@ const dataUrlBytes = (dataUrl) => {
     Object.assign(el.style, {
       pointerEvents: "auto",
       background: variant === "error" ? "#b91c1c" : variant === "info" ? "#334155" : "#111827",
-      color: "white",
-      padding: "10px 14px",
-      borderRadius: "12px",
-      boxShadow: "0 6px 20px rgba(0,0,0,.18)",
-      fontSize: "14px",
-      fontWeight: 500,
-      letterSpacing: ".2px",
-      transform: "translateY(-8px)",
-      opacity: "0",
-      transition: "all .18s ease",
-      maxWidth: "80vw",
-      whiteSpace: "pre-wrap"
+      color: "white", padding: "10px 14px", borderRadius: "12px",
+      boxShadow: "0 6px 20px rgba(0,0,0,.18)", fontSize: "14px", fontWeight: 500,
+      letterSpacing: ".2px", transform: "translateY(-8px)", opacity: "0",
+      transition: "all .18s ease", maxWidth: "80vw", whiteSpace: "pre-wrap"
     });
     root.appendChild(el);
-    requestAnimationFrame(() => {
-      el.style.transform = "translateY(0)";
-      el.style.opacity = "1";
-    });
+    requestAnimationFrame(() => { el.style.transform = "translateY(0)"; el.style.opacity = "1"; });
     setTimeout(() => {
-      el.style.transform = "translateY(-8px)";
-      el.style.opacity = "0";
+      el.style.transform = "translateY(-8px)"; el.style.opacity = "0";
       setTimeout(() => el.remove(), 200);
     }, duration);
   };
 })();
 
-/* ===== 안전한 localStorage 훅 ===== */
-const LS_KEY = "coordination_book_v5";
+/* ========== IndexedDB (photos only) ========== */
+const IDB_NAME  = "coordination_book_db";
+const IDB_STORE = "photos";
+
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(IDB_NAME, 1);
+    r.onupgradeneeded = () => {
+      const db = r.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror   = () => rej(r.error);
+  });
+}
+async function idbPut(key, value) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).put(value, key);
+    tx.oncomplete = () => res(true);
+    tx.onerror    = () => rej(tx.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = () => res(req.result || null);
+    req.onerror   = () => rej(req.error);
+  });
+}
+async function idbDelete(key) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).delete(key);
+    tx.oncomplete = () => res(true);
+    tx.onerror    = () => rej(tx.error);
+  });
+}
+async function idbClearAll() {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).clear();
+    tx.oncomplete = () => res(true);
+    tx.onerror    = () => rej(tx.error);
+  });
+}
+
+/* ========== localStorage (metadata only) ========== */
+const LS_KEY = "coordination_book_v6";
 function useLocalBook() {
   const [book, setBook] = React.useState(() => {
     try {
       const raw = localStorage.getItem(LS_KEY);
       return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
+    } catch { return {}; }
   });
 
   React.useEffect(() => {
-    try {
-      localStorage.setItem(LS_KEY, JSON.stringify(book));
-    } catch (e) {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(book)); }
+    catch (e) {
       console.warn("localStorage save failed:", e);
-      // Safari 가끔 오류나는 케이스 재시도
       setTimeout(() => {
         try { localStorage.setItem(LS_KEY, JSON.stringify(book)); }
-        catch (err2) {
-          alert("Failed to save. Please reduce image size or delete some records.");
-        }
+        catch { alert("Failed to save. Please reduce image size or delete some records."); }
       }, 200);
     }
   }, [book]);
@@ -104,21 +133,17 @@ function useLocalBook() {
     setBook(prev => ({ ...prev, [dayKey]: data }));
   }, []);
   const deleteDay = React.useCallback((dayKey) => {
-    setBook(prev => {
-      const n = { ...prev };
-      delete n[dayKey];
-      return n;
-    });
+    setBook(prev => { const n = { ...prev }; delete n[dayKey]; return n; });
   }, []);
   const clearAll = React.useCallback(() => setBook({}), []);
 
   return [book, { saveDay, deleteDay, clearAll }];
 }
 
-/* ===== 달력 ===== */
+/* ========== Month Grid ========== */
 function monthGrid(year,month){
   const first=new Date(year,month-1,1);
-  const start=(first.getDay()+6)%7; // 월요일 시작
+  const start=(first.getDay()+6)%7; // Monday first
   const days=new Date(year,month,0).getDate();
   const cells=[];
   range(start).forEach(()=>cells.push(null));
@@ -127,20 +152,12 @@ function monthGrid(year,month){
   return cells;
 }
 
-/* ===== 색/팔레트 & 소재 추정 ===== */
-const $work = (()=>{ // 숨김 캔버스 1개 재사용
-  let c=null;
-  return ()=>{
-    if(!c){ c=document.createElement('canvas'); c.width=240; c.height=240; }
-    return c;
-  };
-})();
+/* ========== Color / Material Guess ========== */
+const $work = (()=>{ let c=null; return ()=>{ if(!c){ c=document.createElement('canvas'); c.width=240; c.height=240; } return c; };})();
 const hexOf=({r,g,b})=>"#"+[r,g,b].map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,"0")).join("");
 const dist=(a,b)=>Math.hypot(a.r-b.r,a.g-b.g,a.b-b.b);
-const avg=list=>{
-  const s=list.reduce((p,c)=>({r:p.r+c.r,g:p.g+c.g,b:p.b+c.b}),{r:0,g:0,b:0});
-  const n=list.length||1; return {r:s.r/n,g:s.g/n,b:s.b/n};
-};
+const avg=list=>{ const s=list.reduce((p,c)=>({r:p.r+c.r,g:p.g+c.g,b:p.b+c.b}),{r:0,g:0,b:0}); const n=list.length||1; return {r:s.r/n,g:s.g/n,b:s.b/n}; };
+
 function quantizeColorsFromImg(img,n=4){
   const c=$work(),ctx=c.getContext('2d',{willReadFrequently:true});
   const S=220;c.width=S;c.height=S;ctx.drawImage(img,0,0,S,S);
@@ -191,7 +208,7 @@ function guessMaterialFromImg(img){
   return rough>1600 ? "leather" : "plain";
 }
 
-/* ===== 스와치 SVG들 (양털 없음) ===== */
+/* ========== Swatch SVGs (no fleece) ========== */
 function swatchPlain(colors,strength){
   const [c1=colors[0]||"#d7d7d7", c2=colors[1]||"#bdbdbd"] = colors;
   return `
@@ -304,20 +321,20 @@ function makeSwatch(type,colors,strength){
   }
 }
 
-/* ===== 기본 엔트리 ===== */
+/* ========== Defaults ========== */
 function emptyEntry(){
   return {
     notes:"", photo:null, moods:[],
     palette:null, manualColors:[],
     matType:"auto", strength:60,
     swatchSVG:null,
-    swatchLocked:false // 저장 후 스와치가 마음대로 바뀌지 않도록 잠금
+    swatchLocked:false
   };
 }
 const emojiOnly = s => s ? s.split(" ")[0] : "";
 
-/* ===== 이미지 다운스케일 → JPEG dataURL ===== */
-async function fileToDownscaledJPEG(file, maxW = 1200, quality = 0.85) {
+/* ========== Image Pipeline (WebP + shrink) ========== */
+async function fileToDownscaledWEBP(file, maxW = 900, quality = 0.7) {
   const img = await new Promise((res, rej) => {
     const url = URL.createObjectURL(file);
     const im = new Image();
@@ -326,290 +343,120 @@ async function fileToDownscaledJPEG(file, maxW = 1200, quality = 0.85) {
     im.src = url;
   });
 
-  const w = img.naturalWidth;
-  const h = img.naturalHeight;
+  const w = img.naturalWidth, h = img.naturalHeight;
   const scale = Math.min(1, maxW / Math.max(w, h));
-  const outW = Math.round(w * scale);
-  const outH = Math.round(h * scale);
+  const outW = Math.round(w * scale), outH = Math.round(h * scale);
 
   const c = document.createElement("canvas");
-  c.width = outW;
-  c.height = outH;
-  const ctx = c.getContext("2d");
-  ctx.drawImage(img, 0, 0, outW, outH);
+  c.width = outW; c.height = outH;
+  c.getContext("2d").drawImage(img, 0, 0, outW, outH);
 
-  const dataUrl = c.toDataURL("image/jpeg", quality);
+  const dataUrl = c.toDataURL("image/webp", quality);
   setTimeout(() => URL.revokeObjectURL(img.src), 1000);
   return dataUrl;
 }
+// second pass if still too big
+function shrinkIfTooBig(dataUrl, maxBytes = 230_000) {
+  const b = dataUrlBytes(dataUrl);
+  if (b <= maxBytes) return Promise.resolve(dataUrl);
 
-/* ===== App ===== */
-function App(){
-  const today=new Date();
-  const [year,setYear]=React.useState(today.getFullYear());
-  const [month,setMonth]=React.useState(today.getMonth()+1);
-  const [book, api] = useLocalBook(); // 로컬 전용
-
-  const [openDay,setOpenDay]=React.useState(null);
-  const cells = React.useMemo(()=>monthGrid(year, month),[year, month]);
-
-  // JSON 백업
-  const exportJSON = () => {
-    const blob = new Blob([JSON.stringify(book, null, 2)], { type: "application/json;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = Object.assign(document.createElement('a'), { href:url, download:'coordination_book.json' });
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
-    window.toast?.("downloaded the backup JSON.");
-  };
-  // JSON 불러오기
-  const importJSON = async (file) => {
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      if (!data || typeof data !== 'object') throw new Error("Invalid JSON");
-      // 매우 큰 dataURL이 많은 경우 경고
-      let totalBytes = 0;
-      Object.values(data).forEach(v => { if (v?.photo?.startsWith("data:")) totalBytes += dataUrlBytes(v.photo); });
-      if (totalBytes > 3_500_000) { // 대략 3.5MB 이상
-        alert("There are too many photos or they are too large. Some of them may not be saved.");
-      }
-      // 통으로 갈아끼우기
-      localStorage.setItem(LS_KEY, JSON.stringify(data));
-      window.toast?.("JSON loaded. Refresh the page.", {variant:"info", duration:1800});
-      setTimeout(()=>location.reload(), 600);
-    } catch(e) {
-      console.error(e);
-      alert("Failed to load JSON.");
-    }
-  };
-
-  // 스와치 북 프린트
-  const printCollection = () => {
-    const entries = Object.entries(book || {})
-      .filter(([, v]) => v?.swatchSVG)
-      .sort(([a], [b]) => a.localeCompare(b));
-
-    const formatDMY = (value) => {
-      const [y, m, d] = String(value).split("-").map(Number);
-      return new Date(y, m - 1, d).toLocaleDateString("en-GB", {
-        day: "numeric", month: "short", year: "numeric"
-      });
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      const maxW = 720;
+      const scale = Math.min(1, maxW / Math.max(img.naturalWidth, img.naturalHeight));
+      c.width = Math.round(img.naturalWidth * scale);
+      c.height = Math.round(img.naturalHeight * scale);
+      const ctx = c.getContext("2d");
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL("image/webp", 0.6));
     };
-    const dataObj = Object.fromEntries(
-      entries.map(([k, v]) => ([
-        k,
-        {
-          date: k,
-          dateText: formatDMY(k),
-          matType: v.matType || "-",
-          colors: (v.manualColors?.length ? v.manualColors : (v.palette || [])),
-          photo: v.photo || "",
-          swatchSVG: v.swatchSVG || "",
-          moods: (v.moods || []).map(m => m.split(" ")[0]),
-          note: (v.notes || "")
-        }
-      ]))
-    );
-    const monthName = new Date(year, month - 1).toLocaleDateString("en-GB", { month: "long" });
-const items = entries.map(([k, v]) => {
-  const photo = v.photo
-    ? `<img src="${v.photo}" class="photo" alt="photo"/>`
-    : "";
+    img.src = dataUrl;
+  });
+}
 
-  return `
-    <div class="card" data-key="${k}">
-      <div class="sw-wrap">
-        <div class="sw">${v.swatchSVG || ""}</div>
-        <div class="date-on-swatch">${formatDMY(k)}</div>
-      </div>
-      ${photo}
-    </div>
-  `;
-}).join("");
+/* ========== Photo Resolver Hook (IDB -> URL) ========== */
+function useResolvedPhoto(photoField) {
+  const [url, setUrl] = React.useState(null);
 
+  React.useEffect(() => {
+    let revoke = null, live = true;
+    (async () => {
+      if (!photoField) { setUrl(null); return; }
+      if (!photoField.startsWith("idb:")) { setUrl(photoField); return; }
 
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
-     <meta name="viewport" content="width=device-width, initial-scale=1"/>
-     <title>Swatch Collection</title>
-     <style>
-      :root{ --paper:#f7f3ee; --ink:#1b1b1b; --line:#e5e4e2;
-        --font:"Apple SD Gothic Neo",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans KR",
-        "Hiragino Kaku Gothic ProN","Malgun Gothic","Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol",sans-serif; }
-      *{box-sizing:border-box}
-      html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);font-family:var(--font)}
-      .wrap{max-width:1024px;margin:32px auto;padding:24px}
-      .header{text-align:center;margin-bottom:20px;border-bottom:1px solid var(--line);padding-bottom:8px}
-      .title-main{font-size:28px;font-weight:600}
-      .subtle{color:#666;font-size:12px}
-      .grid{display:grid;grid-template-columns:repeat(auto-fit,7cm);gap:0.8cm;justify-content:center;align-items:start;margin-top:1cm}
-      .card{width:7cm;height:12cm;background:#fff;border:0.05cm solid var(--line);border-radius:0.4cm;overflow:hidden;
-            box-shadow:0 0.05cm 0.15cm rgba(0,0,0,.04);display:flex;flex-direction:column;cursor:pointer}
-      .sw-wrap{position:relative;width:100%;height:7cm;overflow:hidden;background:#000}
-      .sw{position:absolute;inset:0;width:100%;height:100%}
-      .sw svg{width:100%;height:100%;display:block}
-      .date-on-swatch{position:absolute;left:50%;top:0.45cm;transform:translateX(-50%);
-        color:#fff;font-weight:700;font-size:0.46cm;text-shadow:0 1px 2px rgba(0,0,0,.45),0 0 12px rgba(0,0,0,.35)}
-      .photo{width:100%;height:5cm;display:block;object-fit:cover;object-position:center;background:#eee}
-      @page{ size:A3 portrait; margin:1.5cm; }
-      @media print {
-        html, body { width: 297mm; height: 420mm; transform: scale(1); transform-origin: top left; }
+      const key = `photo:${photoField.slice(4)}`;
+      const stored = await idbGet(key);
+      if (!live) return;
+      if (!stored) { setUrl(null); return; }
+
+      if (typeof stored === "string" && stored.startsWith("data:")) {
+        setUrl(stored);
+      } else if (stored instanceof Blob) {
+        const obj = URL.createObjectURL(stored);
+        revoke = obj;
+        setUrl(obj);
+      } else {
+        setUrl(null);
       }
-     </style>
-    </head><body>
-      <div class="wrap">
-        <div class="header">
-          <div class="title-main">Fabric Swatch Collection</div>
-          <div class="subtle">${monthName} · ${year}</div>
-          <button id="printBtn" style="margin-top:8px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer">Print</button>
-        </div>
-        <div class="grid">${items || "<div class='subtle'>No swatches yet.</div>"}</div>
-      </div>
-      <script>
-        document.getElementById('printBtn').addEventListener('click', function(){ window.print(); });
-      </script>
-    </body></html>`;
+    })();
 
-    const w = window.open("", "_blank");
-    w.document.open(); w.document.write(html); w.document.close();
-  };
+    return () => { live = false; if (revoke) URL.revokeObjectURL(revoke); };
+  }, [photoField]);
 
+  return url;
+}
+
+/* ========== Day Cell (uses hook) ========== */
+function DayCell({ date, entry, isToday, onOpen }) {
+  const rphoto = useResolvedPhoto(entry?.photo);
   return (
-    <div className="max-w-6xl mx-auto min-h-screen bg-[#f7f3ee] text-[#1b1b1b] px-10 py-12 font-sans">
-      {/* 헤더 */}
-      <header className="flex items-end justify-between pb-4 mb-10 border-b border-stone-300/60">
-        <h1 className="text-4xl sm:text-5xl leading-none tracking-tight font-semibold">
-          {new Date(year, month-1).toLocaleDateString("en-GB",{ month:"long" })} <span className="font-semibold">{year}</span>
-        </h1>
-        <div className="flex gap-2 items-center">
-          <button
-            className="px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
-            onClick={()=>{ if(month===1){ setYear(y=>y-1); setMonth(12);} else setMonth(m=>m-1); }}
-          >Prev</button>
-          <button
-            className="px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
-            onClick={()=>{ if(month===12){ setYear(y=>y+1); setMonth(1);} else setMonth(m=>m+1); }}
-          >Next</button>
+    <div
+      onClick={onOpen}
+      className={[
+        "relative group aspect-square rounded-[22px] overflow-hidden cursor-pointer",
+        "bg-white border border-stone-200/70 shadow-[0_1px_0_rgba(0,0,0,0.04)]",
+        "hover:shadow-[0_4px_16px_rgba(0,0,0,0.08)] hover:-translate-y-[2px] transition-all duration-200"
+      ].join(" ")}
+    >
+      <div className="absolute top-2 right-3 text-[11px] tracking-wide font-semibold text-stone-500">
+        {date.getDate()}
+      </div>
 
-          <button
-            className="ml-2 px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
-            onClick={printCollection}
-          >View Swatch Book</button>
+      {rphoto ? (
+        <img src={rphoto} alt="" className="w-full h-full object-cover brightness-[0.96] group-hover:brightness-100 transition-all duration-200" />
+      ) : (
+        <div className="flex items-center justify-center h-full text-stone-300 text-[12px] italic"></div>
+      )}
 
-          {/* JSON 백업/불러오기 */}
-          <button
-            className="ml-2 px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
-            onClick={exportJSON}
-          >Backup JSON</button>
-
-          <label className="px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition cursor-pointer">
-            Import JSON
-            <input type="file" accept="application/json" className="hidden" onChange={e=>{
-              const f = e.target.files?.[0]; if (f) importJSON(f);
-              e.target.value = "";
-            }}/>
-          </label>
-
-          <button
-            className="px-4 py-2 rounded-full border border-red-200 text-red-700 text-[12px] tracking-wide hover:bg-red-50 transition"
-            onClick={()=>{
-              if (confirm("Would you like to reset all records? This action is irreversible.")) {
-                api.clearAll();
-                window.toast?.("All record deleted.", {variant:"info"});
-              }
-            }}
-          >Clear All</button>
+      <div className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+        <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-[#1b1b1b]/70 to-transparent"></div>
+        <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
+          <div className="text-white text-[12px] leading-tight font-light">
+            {entry?.moods?.slice(0,2).map((m,i)=><div key={i}>{emojiOnly(m)}</div>)}
+          </div>
+          <div className="flex gap-1">
+            {entry?.swatchSVG ? <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/90"></span> : null}
+            {rphoto ? <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/50"></span> : null}
+          </div>
         </div>
-      </header>
-
-      {/* 요일 헤더 */}
-      <div className="grid grid-cols-7 text-center text-[11px] tracking-wide text-stone-500 mb-2 font-medium">
-        {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d => <div key={d}>{d}</div>)}
       </div>
 
-      {/* 날짜 그리드 */}
-      <div className="grid grid-cols-7 gap-3">
-        {cells.map((date,i)=>{
-          if(!date) return <div key={i} className="aspect-square bg-transparent" />;
-          const key = ymd(date);
-          const entry = (book || {})[key];
-          const isToday = ymd(new Date())===key;
-
-          return (
-            <div
-              key={i}
-              onClick={()=>setOpenDay(key)}
-              className={[
-                "relative group aspect-square rounded-[22px] overflow-hidden cursor-pointer",
-                "bg-white border border-stone-200/70 shadow-[0_1px_0_rgba(0,0,0,0.04)]",
-                "hover:shadow-[0_4px_16px_rgba(0,0,0,0.08)] hover:-translate-y-[2px] transition-all duration-200"
-              ].join(" ")}
-            >
-              <div className="absolute top-2 right-3 text-[11px] tracking-wide font-semibold text-stone-500">
-                {date.getDate()}
-              </div>
-
-              {entry?.photo ? (
-                <img
-                  src={entry.photo}
-                  alt=""
-                  className="w-full h-full object-cover brightness-[0.96] group-hover:brightness-100 transition-all duration-200"
-                />
-              ) : (
-                <div className="flex items-center justify-center h-full text-stone-300 text-[12px] italic">
-                </div>
-              )}
-
-              <div className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-[#1b1b1b]/70 to-transparent"></div>
-                <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
-                  <div className="text-white text-[12px] leading-tight font-light">
-                    {entry?.moods?.slice(0,2).map((m,i)=><div key={i}>{emojiOnly(m)}</div>)}
-                  </div>
-                  <div className="flex gap-1">
-                    {entry?.swatchSVG ? <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/90"></span> : null}
-                    {entry?.photo ? <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/50"></span> : null}
-                  </div>
-                </div>
-              </div>
-
-              {isToday && (
-                <div className="absolute inset-0 rounded-[22px] ring-2 ring-stone-900/35 pointer-events-none"></div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {openDay && (
-        <DetailPanel
-          day={openDay}
-          entry={book[openDay] || emptyEntry()}
-          onClose={() => setOpenDay(null)}
-          onSave={(localData) => {
-            // 저장 시 스와치 잠금 옵션 유지
-            api.saveDay(openDay, { ...localData });
-            window.toast?.("Saved successfully!", {variant:"ok"});
-          }}
-          onDelete={() => {
-            api.deleteDay(openDay);
-            window.toast?.("Record deleted.", {variant:"info"});
-            setOpenDay(null);
-          }}
-        />
+      {isToday && (
+        <div className="absolute inset-0 rounded-[22px] ring-2 ring-stone-900/35 pointer-events-none"></div>
       )}
     </div>
   );
 }
 
-/* ===== 상세 패널 ===== */
+/* ========== Detail Panel ========== */
 function DetailPanel({day,entry,onClose,onSave,onDelete}){
   const [local,setLocal]=React.useState(entry);
   const [matType,setMatType]=React.useState(entry.matType||"auto");
   const [strength,setStrength]=React.useState(entry.strength ?? 60);
-
-  // 저장 후 스와치가 바뀌지 않게 잠금
   const [swatchLocked, setSwatchLocked] = React.useState(!!entry.swatchLocked);
+  const resolvedPhoto = useResolvedPhoto(local.photo);
 
   const MOODS=["😊 happiness","😌 cozy","💖 romantic","⚡ concentration","✨ inspiration","😴 tired","😡 anger", "😭 sad", "😔 loneliness", "🌞 sunny","☁️ cloudy","🌧️ rainy", "☃️ snowy"];
 
@@ -618,49 +465,46 @@ function DetailPanel({day,entry,onClose,onSave,onDelete}){
     return {...prev,moods:has?prev.moods.filter(x=>x!==m):[...prev.moods||[],m]};
   });
 
-  // 사진 업로드 → 팔레트 추출 (로컬 dataURL 저장)
+  // photo select -> WebP -> shrink -> IDB put -> metadata points to idb:<day>
   const onPhotoSelected = (rawFile) => {
     if (!rawFile) return;
     (async ()=>{
       try {
-        const jpegData = await fileToDownscaledJPEG(rawFile, 700, 0.5);
-        if (dataUrlBytes(jpegData) > 800_000) {
-          alert("The photo size is large and may cause storage issues. Please use a smaller photo.");
-        }
+        const webp = await fileToDownscaledWEBP(rawFile, 900, 0.7);
+        const compact = await shrinkIfTooBig(webp, 230_000);
 
         const img = await new Promise((res, rej) => {
           const im = new Image();
           im.onload = () => res(im);
           im.onerror = () => rej(new Error("Image load failed"));
-          im.src = jpegData;
+          im.src = compact;
         });
         const palette = quantizeColorsFromImg(img, 4);
 
-        // auto면 미리보기만(잠금이 아닐 때만) 생성
-        let next = { ...local, photo: jpegData, palette };
+        await idbPut(`photo:${day}`, compact);
+        let next = { ...local, photo: `idb:${day}`, palette };
+
         if (!swatchLocked && matType === "auto") {
           const t = guessMaterialFromImg(img);
           const colors = (next.manualColors?.length ? next.manualColors : palette) || palette;
           const svg = makeSwatch(t, colors, Number(strength));
           next = { ...next, matType: t, swatchSVG: svg };
-          setMatType(t); // auto → 추정값으로 고정
+          setMatType(t);
         }
         setLocal(next);
-        window.toast?.("The picture is reflected", {variant:"ok"});
+        window.toast?.("Photo updated.", {variant:"ok"});
       } catch (err) {
         console.error(err);
-        alert("Image processing failure");
+        alert("Image processing failed.");
       }
     })();
   };
 
-  // 수동 색상
   const addManualColor = ()=>{
     setLocal(prev=>{
       const arr=[...(prev.manualColors||[])];
       if(arr.length>=6) return prev;
       arr.push("#cccccc");
-      // 잠금이 아니고 type 고정된 경우, 미리보기 갱신
       if(!swatchLocked && (matType!=="auto")){
         const svg=makeSwatch(matType, arr, Number(strength));
         return {...prev, manualColors:arr, swatchSVG:svg};
@@ -703,7 +547,6 @@ function DetailPanel({day,entry,onClose,onSave,onDelete}){
     });
   };
 
-  // 타입/강도 변경 시: 잠금이 아닐 때만 즉시 미리보기
   React.useEffect(()=>{
     if (swatchLocked) return;
     const colors = (local.manualColors?.length>0 ? local.manualColors : local.palette);
@@ -714,12 +557,11 @@ function DetailPanel({day,entry,onClose,onSave,onDelete}){
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[matType,strength]);
 
-  // 스와치 생성 버튼 (이때 잠금 켬)
   const generateSwatch=()=>{
     const colors = (local.manualColors?.length>0 ? local.manualColors : local.palette) || ["#d0d0d0","#a0a0a0","#808080","#e5e5e5"];
     let type=matType;
     if(type==="auto"){
-      if(!local.photo){ alert("Upload a photo"); return; }
+      if(!resolvedPhoto){ alert("Upload a photo first."); return; }
       const img=new Image();
       img.onload=()=>{
         type=guessMaterialFromImg(img);
@@ -727,21 +569,20 @@ function DetailPanel({day,entry,onClose,onSave,onDelete}){
         setMatType(type);
         setLocal(prev=>({...prev, matType:type, swatchSVG:svg }));
         setSwatchLocked(true);
-        window.toast?.("created and fixed a swatch.", {variant:"ok"});
+        window.toast?.("Swatch created & locked.", {variant:"ok"});
       };
-      img.src=local.photo;
+      img.src=resolvedPhoto;
       return;
     }
     const svg=makeSwatch(type, colors, Number(strength));
     setLocal(prev=>({...prev, swatchSVG:svg }));
     setSwatchLocked(true);
-    window.toast?.("created and fixed a swatch.", {variant:"ok"});
+    window.toast?.("Swatch created & locked.", {variant:"ok"});
   };
 
-  // 잠금 해제
   const unlockSwatch = ()=>{
     setSwatchLocked(false);
-    window.toast?.("The swatch has been unlocked. It can be changed again if you edit it.", {variant:"info"});
+    window.toast?.("Swatch unlocked. You can change it again.", {variant:"info"});
   };
 
   return (
@@ -762,7 +603,7 @@ function DetailPanel({day,entry,onClose,onSave,onDelete}){
         </div>
 
         <div className="mt-6 space-y-6">
-          {/* 메모 */}
+          {/* Note */}
           <section>
             <label className="block text-sm font-medium mb-2">Note</label>
             <textarea rows={4}
@@ -772,7 +613,7 @@ function DetailPanel({day,entry,onClose,onSave,onDelete}){
               placeholder="ex: It’s date day! I wanna look pretty today!"/>
           </section>
 
-          {/* 이모지 */}
+          {/* Emoji */}
           <section>
             <h4 className="text-sm font-medium mb-2">Emoji</h4>
             <div className="flex flex-wrap gap-2">
@@ -784,53 +625,36 @@ function DetailPanel({day,entry,onClose,onSave,onDelete}){
             </div>
           </section>
 
-          {/* 사진 */}
+          {/* Photo */}
           <section>
             <h4 className="text-sm font-medium mb-2">OOTD</h4>
-            {local.photo ? (
-              <img src={local.photo} alt="outfit" className="w-full rounded-xl border object-cover" />
+            {resolvedPhoto ? (
+              <img src={resolvedPhoto} alt="outfit" className="w-full rounded-xl border object-cover" />
             ) : null}
             <label className="inline-flex items-center gap-2 mt-3 px-4 py-2 border rounded-xl cursor-pointer hover:bg-stone-50">
-              <span>{local.photo ? "Upload Again" : "Choose File"}</span>
-              <span className="text-sm text-stone-500">{local.photo ? "File selected" : "No file chosen"}</span>
+              <span>{resolvedPhoto ? "Upload Again" : "Choose File"}</span>
+              <span className="text-sm text-stone-500">{resolvedPhoto ? "File selected" : "No file chosen"}</span>
               <input
                 type="file"
-                accept="image/jpeg,image/jpg,image/png"
+                accept="image/*"
                 className="hidden"
                 onChange={e=>{ const f=e.target.files?.[0]; if(f) onPhotoSelected(f); e.target.value=""; }}
               />
             </label>
-            <div className="text-xs text-stone-500 mt-1">* Except for HEIC. Change the iPhone camera settings to JPEG.</div>
+            <div className="text-xs text-stone-500 mt-1">* Photos are stored locally in your browser (IndexedDB).</div>
           </section>
 
-          {/* 스와치 */}
+          {/* Swatch */}
           <section>
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-medium">Swatch</h4>
               <div className="flex gap-2">
-                <button className="px-3 py-2 rounded-xl border hover:bg-stone-50" onClick={()=>{
-                  const arr=[...(local.manualColors||[])];
-                  if(arr.length>=6) return;
-                  arr.push("#cccccc");
-                  setLocal(prev=>({...prev, manualColors:arr}));
-                  if(!swatchLocked && (matType!=="auto")){
-                    const svg=makeSwatch(matType, arr, Number(strength));
-                    setLocal(prev=>({...prev, manualColors:arr, swatchSVG:svg}));
-                  }
-                }}>+ manual color</button>
-                <button className="px-3 py-2 rounded-xl border hover:bg-stone-50" onClick={()=>{
-                  const colors = local.palette||[];
-                  if(!swatchLocked && (matType!=="auto")){
-                    const svg = colors.length ? makeSwatch(matType, colors, Number(strength)) : null;
-                    setLocal(prev=>({...prev, manualColors:[], swatchSVG:svg}));
-                  } else {
-                    setLocal(prev=>({...prev, manualColors:[]}));
-                  }
-                }}>reset manual color</button>
+                <button className="px-3 py-2 rounded-xl border hover:bg-stone-50" onClick={addManualColor}>+ manual color</button>
+                <button className="px-3 py-2 rounded-xl border hover:bg-stone-50" onClick={clearManualColors}>reset manual color</button>
               </div>
             </div>
 
-            {/* 자동 팔레트 미리보기 */}
+            {/* Auto palette preview */}
             <div className="mt-3">
               <div className="text-xs text-stone-500 mb-1">automatic color extraction palette</div>
               <div className="flex gap-1">
@@ -840,7 +664,7 @@ function DetailPanel({day,entry,onClose,onSave,onDelete}){
               </div>
             </div>
 
-            {/* 수동 색상 피커 */}
+            {/* Manual colors */}
             <div className="mt-3">
               <div className="text-xs text-stone-500 mb-1">color picker (takes priority if set)</div>
               <div className="flex flex-wrap gap-2">
@@ -851,7 +675,7 @@ function DetailPanel({day,entry,onClose,onSave,onDelete}){
                         onChange={e=>changeManualColor(i,e.target.value)}
                         style={{appearance:'none',border:'none',padding:0,width:28,height:28,background:'none'}}/>
                     </label>
-                    <button className="px-2 py-1 text-xs border rounded-lg hover:bg-stone-50" onClick={()=>removeManualColor(i)}>삭제</button>
+                    <button className="px-2 py-1 text-xs border rounded-lg hover:bg-stone-50" onClick={()=>removeManualColor(i)}>Delete</button>
                   </div>
                 ))}
                 {(!local.manualColors || local.manualColors.length===0) && (
@@ -861,7 +685,7 @@ function DetailPanel({day,entry,onClose,onSave,onDelete}){
             </div>
           </section>
 
-          {/* 소재 스와치 생성 */}
+          {/* Swatch generator */}
           <section>
             <div className="flex items-center gap-2">
               <select value={matType} onChange={e=>setMatType(e.target.value)} className="border rounded-lg px-2 py-1 text-sm">
@@ -883,9 +707,7 @@ function DetailPanel({day,entry,onClose,onSave,onDelete}){
               {swatchLocked ? (
                 <button className="px-3 py-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-800"
                         onClick={unlockSwatch}>unlock</button>
-              ) : (
-                <span className="text-xs text-stone-500"></span>
-              )}
+              ) : <span className="text-xs text-stone-500"></span>}
             </div>
 
             <div className="mt-3">
@@ -898,19 +720,226 @@ function DetailPanel({day,entry,onClose,onSave,onDelete}){
           </section>
 
           <div className="flex gap-2">
-            <button className="px-3 py-2 rounded-xl border border-red-200 text-red-700 hover:bg-red-50" onClick={onDelete}>
+            <button className="px-3 py-2 rounded-xl border border-red-200 text-red-700 hover:bg-red-50" onClick={async ()=>{
+              await idbDelete(`photo:${day}`);
+              onDelete();
+            }}>
               Reset record
             </button>
           </div>
         </div>
       </div>
-
       <button className="absolute right-[max(24rem,40%)] top-4 bg-white p-2 rounded-xl shadow" onClick={onClose}>✕</button>
     </div>
   );
 }
 
-/* ===== 에러 바운더리 및 부트스트랩 ===== */
+/* ========== App ========== */
+function App(){
+  const today=new Date();
+  const [year,setYear]=React.useState(today.getFullYear());
+  const [month,setMonth]=React.useState(today.getMonth()+1);
+  const [book, api] = useLocalBook();
+
+  const [openDay,setOpenDay]=React.useState(null);
+  const cells = React.useMemo(()=>monthGrid(year, month),[year, month]);
+
+  // Backup metadata only
+  const exportJSON = () => {
+    const blob = new Blob([JSON.stringify(book, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement('a'), { href:url, download:'coordination_book.json' });
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    window.toast?.("Downloaded metadata JSON. (Photos stay in your browser)", {variant:"info", duration:2000});
+  };
+  // Import metadata only
+  const importJSON = async (file) => {
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data || typeof data !== 'object') throw new Error("Invalid JSON");
+      localStorage.setItem(LS_KEY, JSON.stringify(data));
+      window.toast?.("JSON loaded. Refreshing...", {variant:"info", duration:1600});
+      setTimeout(()=>location.reload(), 600);
+    } catch(e) {
+      console.error(e);
+      alert("Failed to load JSON.");
+    }
+  };
+
+  // Print (try to embed photos if they are in IDB)
+  const printCollection = async () => {
+    const entries = Object.entries(book || {})
+      .filter(([, v]) => v?.swatchSVG)
+      .sort(([a], [b]) => a.localeCompare(b));
+
+    const formatDMY = (value) => {
+      const [y, m, d] = String(value).split("-").map(Number);
+      return new Date(y, m - 1, d).toLocaleDateString("en-GB", {
+        day: "numeric", month: "short", year: "numeric"
+      });
+    };
+
+    // resolve photos (dataURL if available, otherwise omit)
+    const resolved = await Promise.all(entries.map(async ([k, v]) => {
+      let photo = "";
+      if (v.photo && v.photo.startsWith("idb:")) {
+        const got = await idbGet(`photo:${k}`);
+        if (typeof got === "string" && got.startsWith("data:")) photo = got;
+      } else if (typeof v.photo === "string") {
+        photo = v.photo;
+      }
+      return [k, v, photo];
+    }));
+
+    const items = resolved.map(([k, v, photo]) => `
+      <div class="card" data-key="${k}">
+        <div class="sw-wrap">
+          <div class="sw">${v.swatchSVG || ""}</div>
+          <div class="date-on-swatch">${formatDMY(k)}</div>
+        </div>
+        ${photo ? `<img src="${photo}" class="photo" alt="photo"/>` : ""}
+      </div>
+    `).join("");
+
+    const monthName = new Date(year, month - 1).toLocaleDateString("en-GB", { month: "long" });
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+     <meta name="viewport" content="width=device-width, initial-scale=1"/>
+     <title>Swatch Collection</title>
+     <style>
+      :root{ --paper:#f7f3ee; --ink:#1b1b1b; --line:#e5e4e2;
+        --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans KR",Arial,sans-serif; }
+      *{box-sizing:border-box}
+      html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);font-family:var(--font)}
+      .wrap{max-width:1024px;margin:32px auto;padding:24px}
+      .header{text-align:center;margin-bottom:20px;border-bottom:1px solid var(--line);padding-bottom:8px}
+      .title-main{font-size:28px;font-weight:600}
+      .subtle{color:#666;font-size:12px}
+      .grid{display:grid;grid-template-columns:repeat(auto-fit,7cm);gap:0.8cm;justify-content:center;align-items:start;margin-top:1cm}
+      .card{width:7cm;height:12cm;background:#fff;border:0.05cm solid var(--line);border-radius:0.4cm;overflow:hidden;
+            box-shadow:0 0.05cm 0.15cm rgba(0,0,0,.04);display:flex;flex-direction:column}
+      .sw-wrap{position:relative;width:100%;height:7cm;overflow:hidden;background:#000}
+      .sw{position:absolute;inset:0;width:100%;height:100%}
+      .sw svg{width:100%;height:100%;display:block}
+      .date-on-swatch{position:absolute;left:50%;top:0.45cm;transform:translateX(-50%);
+        color:#fff;font-weight:700;font-size:0.46cm;text-shadow:0 1px 2px rgba(0,0,0,.45),0 0 12px rgba(0,0,0,.35)}
+      .photo{width:100%;height:5cm;display:block;object-fit:cover;object-position:center;background:#eee}
+      @page{ size:A3 portrait; margin:1.5cm; }
+      @media print { html, body { width: 297mm; height: 420mm; } }
+     </style>
+    </head><body>
+      <div class="wrap">
+        <div class="header">
+          <div class="title-main">Fabric Swatch Collection</div>
+          <div class="subtle">${monthName} · ${year}</div>
+          <button id="printBtn" style="margin-top:8px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer">Print</button>
+        </div>
+        <div class="grid">${items || "<div class='subtle'>No swatches yet.</div>"}</div>
+      </div>
+      <script>document.getElementById('printBtn').addEventListener('click', function(){ window.print(); });</script>
+    </body></html>`;
+
+    const w = window.open("", "_blank");
+    w.document.open(); w.document.write(html); w.document.close();
+  };
+
+  return (
+    <div className="max-w-6xl mx-auto min-h-screen bg-[#f7f3ee] text-[#1b1b1b] px-10 py-12 font-sans">
+      {/* Header */}
+      <header className="flex items-end justify-between pb-4 mb-10 border-b border-stone-300/60">
+        <h1 className="text-4xl sm:text-5xl leading-none tracking-tight font-semibold">
+          {new Date(year, month-1).toLocaleDateString("en-GB",{ month:"long" })} <span className="font-semibold">{year}</span>
+        </h1>
+        <div className="flex gap-2 items-center">
+          <button
+            className="px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
+            onClick={()=>{ if(month===1){ setYear(y=>y-1); setMonth(12);} else setMonth(m=>m-1); }}
+          >Prev</button>
+          <button
+            className="px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
+            onClick={()=>{ if(month===12){ setYear(y=>y+1); setMonth(1);} else setMonth(m=>m+1); }}
+          >Next</button>
+
+          <button
+            className="ml-2 px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
+            onClick={printCollection}
+          >View Swatch Book</button>
+
+          {/* JSON backup/import (metadata) */}
+          <button
+            className="ml-2 px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition"
+            onClick={exportJSON}
+          >Backup JSON</button>
+
+          <label className="px-4 py-2 rounded-full border border-stone-400/80 text-[12px] tracking-wide hover:bg-[#1b1b1b] hover:text-white transition cursor-pointer">
+            Import JSON
+            <input type="file" accept="application/json" className="hidden" onChange={e=>{
+              const f = e.target.files?.[0]; if (f) importJSON(f);
+              e.target.value = "";
+            }}/>
+          </label>
+
+          <button
+            className="px-4 py-2 rounded-full border border-red-200 text-red-700 text-[12px] tracking-wide hover:bg-red-50 transition"
+            onClick={async ()=>{
+              if (confirm("Would you like to reset ALL records and photos? This action is irreversible.")) {
+                await idbClearAll();
+                api.clearAll();
+                window.toast?.("All records and photos deleted.", {variant:"info"});
+              }
+            }}
+          >Clear All</button>
+        </div>
+      </header>
+
+      {/* Week headers */}
+      <div className="grid grid-cols-7 text-center text-[11px] tracking-wide text-stone-500 mb-2 font-medium">
+        {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d => <div key={d}>{d}</div>)}
+      </div>
+
+      {/* Calendar */}
+      <div className="grid grid-cols-7 gap-3">
+        {cells.map((date,i)=>{
+          if(!date) return <div key={i} className="aspect-square bg-transparent" />;
+          const key = ymd(date);
+          const entry = (book || {})[key];
+          const isToday = ymd(new Date())===key;
+
+          return (
+            <DayCell
+              key={i}
+              date={date}
+              entry={entry}
+              isToday={isToday}
+              onOpen={()=>setOpenDay(key)}
+            />
+          );
+        })}
+      </div>
+
+      {openDay && (
+        <DetailPanel
+          day={openDay}
+          entry={book[openDay] || emptyEntry()}
+          onClose={() => setOpenDay(null)}
+          onSave={(localData) => {
+            api.saveDay(openDay, { ...localData });
+            window.toast?.("Saved successfully!", {variant:"ok"});
+          }}
+          onDelete={() => {
+            api.deleteDay(openDay);
+            window.toast?.("Record deleted.", {variant:"info"});
+            setOpenDay(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ========== Error Boundary & Bootstrap ========== */
 class ErrorBoundary extends React.Component {
   constructor(p){ super(p); this.state = { error: null }; }
   static getDerivedStateFromError(err){ return { error: err }; }
@@ -919,16 +948,12 @@ class ErrorBoundary extends React.Component {
       return (
         <div className="p-6">
           <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700">
-            <b>렌더 오류</b><br />
-            An error may have occurred due to saved data or images. The swatch has been unlocked. It may change again if you edit it.
+            <b>Render Error</b><br />
+            An error may have occurred due to saved data or images.
             <div className="mt-3 flex gap-2">
-              <button className="px-3 py-2 border rounded-lg" onClick={()=>location.reload()}>
-                새로고침
-              </button>
-              <button
-                className="px-3 py-2 border rounded-lg"
-                onClick={() => { localStorage.removeItem("coordination_book_v5"); location.reload(); }}>
-                저장데이터 초기화
+              <button className="px-3 py-2 border rounded-lg" onClick={()=>location.reload()}>Reload</button>
+              <button className="px-3 py-2 border rounded-lg" onClick={() => { localStorage.removeItem(LS_KEY); location.reload(); }}>
+                Clear local metadata
               </button>
             </div>
           </div>
