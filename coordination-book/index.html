@@ -27,13 +27,17 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
   import {
-    initializeFirestore, doc, getDoc, setDoc, onSnapshot, deleteField
+    getFirestore, doc, getDoc, setDoc, onSnapshot,
+    collection, getDocs, deleteField    /* ⬅️ 추가 */
   } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js";
   import { getAuth, signInAnonymously }
     from "https://www.gstatic.com/firebasejs/12.5.0/firebase-auth.js";
+
+  /* ✅ NEW: Storage SDK 추가 */
   import {
-    getStorage, ref as sref, uploadString, getDownloadURL, uploadBytes
+    getStorage, ref as sref, uploadString, uploadBytes, getDownloadURL
   } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-storage.js";
+
 
   const firebaseConfig = {
     apiKey: "AIzaSyDJbRAuqHhFQsHGgam-xeRFxOcxA9awTqM",
@@ -45,27 +49,25 @@
     measurementId: "G-F72EJY2TNK"
   };
 
-  if (!window._fb) {
-    const app = initializeApp(firebaseConfig);
-
-    // ✅ Safari 우회: 스트리밍 fetch 끄고 long-polling 강제
-    const db = initializeFirestore(app, {
-      experimentalForceLongPolling: true,
-      useFetchStreams: false
-    });
-
-    const st   = getStorage(app);
+    if (!window._fb) {
+    const app  = initializeApp(firebaseConfig);
+    const db   = getFirestore(app);
     const auth = getAuth(app);
+    const st   = getStorage(app);            // ⬅️ 추가
 
-    window._fb    = { app, db, st, auth };
+    window._fb    = { app, db, auth, st };   // ⬅️ st 포함
     window._fbFns = {
-      doc, getDoc, setDoc, onSnapshot, deleteField,
-      sref, uploadString, getDownloadURL, uploadBytes
+      // Firestore
+      doc, getDoc, setDoc, onSnapshot,
+      collection, getDocs, deleteField,
+      // Storage
+      sref, uploadString, uploadBytes, getDownloadURL
     };
 
     signInAnonymously(auth).catch(e => console.error("Anon sign-in error:", e));
   }
 </script>
+
 
 
 <!-- HEIC -> JPEG 변환 (UMD, window.heic2any 로 노출) -->

@@ -1,4 +1,33 @@
 /* ===== 유틸 ===== */
+async function normalizeEntryBeforeSave(day, d) {
+  const safe = { ...d };
+
+  // 절대 dataURL을 Firestore에 넣지 않음
+  if (safe.photo && typeof safe.photo === "string" && safe.photo.startsWith("data:")) {
+    try {
+      safe.photo = await uploadDataURL(`photos/${day}.jpg`, safe.photo);
+    } catch {
+      safe.photo = null;
+    }
+  }
+
+  // swatchSVG는 길면 Storage로 넘기고 URL만 저장
+  if (safe.swatchSVG && safe.swatchSVG.length > 4000) {
+    try {
+      const url = await uploadText(`swatches/${day}.svg`, safe.swatchSVG);
+      safe.swatchSVG = url;
+    } catch {
+      // 실패해도 저장은 진행
+      console.warn("swatchSVG upload failed");
+    }
+  }
+
+  // 컬렉션 필드 최소화(불필요한 폭증 방지)
+  safe.moods = (safe.moods || []).slice(0, 8);
+  safe.manualColors = (safe.manualColors || []).slice(0, 6);
+
+  return safe;
+}
 
 // ===== Storage 업로드 유틸 =====
 async function uploadDataURL(path, dataUrl) {
@@ -191,42 +220,37 @@ function monthGrid(year,month){
   return cells;
 }
 
-function useCloudBook(docId="public-book"){
+function useCloudBook(docId = "public-book") {
   const [book, setBook] = React.useState(null);
 
-  React.useEffect(()=>{
-    if(!window._fb?.db || !window._fbFns?.doc) return;
-    const F   = window._fbFns;
-    const ref = F.doc(window._fb.db, "books", docId);
-    let unsub;
-    (async ()=>{
-      const snap = await F.getDoc(ref);
-      if(!snap.exists()) await F.setDoc(ref, {});
-      unsub = F.onSnapshot(ref, s=> setBook(s.exists()? s.data(): {}));
-    })();
-    return ()=> unsub && unsub();
+  React.useEffect(() => {
+    if (!window._fb?.db || !window._fbFns?.collection) return;
+    const F = window._fbFns;
+    // books/{docId}/entries 서브컬렉션 구독
+    const colRef = F.collection(window._fb.db, "books", docId, "entries");
+    const unsub = F.onSnapshot(colRef, (snap) => {
+      const map = {};
+      snap.forEach((d) => (map[d.id] = d.data()));
+      setBook(map);
+    });
+    return () => unsub && unsub();
   }, [docId]);
 
-  const saveDay = React.useCallback(async (dayKey, data)=>{
-    setBook(prev=> ({...(prev||{}), [dayKey]: data}));
-    const F   = window._fbFns;
-    const ref = F.doc(window._fb.db, "books", docId);
-    await F.setDoc(ref, { [dayKey]: data }, { merge: true });  // ✅ 필드 머지
+  const saveDay = React.useCallback(async (dayKey, data) => {
+    const F = window._fbFns;
+    const ref = F.doc(window._fb.db, "books", docId, "entries", dayKey);
+    await F.setDoc(ref, data, { merge: true });
   }, [docId]);
 
-  const deleteDay = React.useCallback(async (dayKey)=>{
-    setBook(prev=>{ const n={...(prev||{})}; delete n[dayKey]; return n; });
-    const F   = window._fbFns;
-    const ref = F.doc(window._fb.db, "books", docId);
-    await F.setDoc(ref, { [dayKey]: window._fbFns.deleteField() }, { merge: true }); // ✅ 필드 삭제
+  const deleteDay = React.useCallback(async (dayKey) => {
+    const F = window._fbFns;
+    const ref = F.doc(window._fb.db, "books", docId, "entries", dayKey);
+    // 모든 필드 삭제 대신 빈 문서로 덮기거나 필요한 필드만 비움
+    await F.setDoc(ref, {}, { merge: false });
   }, [docId]);
 
-  return [{...(book||{})}, { saveDay, deleteDay }];
+  return [book || {}, { saveDay, deleteDay }];
 }
-
-
-
-
 
 // ---- Firebase 전역 핸들러 ----
 const FB = window._fb || {};
@@ -741,24 +765,30 @@ const entries = Object.entries(book || {})
 
  {openDay && (
   <DetailPanel
-    day={openDay}
-    entry={book[openDay] || emptyEntry()}
-    onClose={() => setOpenDay(null)}
-    onSave={async (localData) => {
-      await api.saveDay(openDay, localData);
-      window.toast?.("OOTD saved!", { variant: "ok", duration: 1200 });
-      setOpenDay(null);
-    }}
-    onDelete={async () => {
-      await api.deleteDay(openDay);
-      window.toast?.("Record reset.", { variant: "ok", duration: 1200 });
-      setOpenDay(null);
-    }}
-    onMakeSwatch={(payload) => {
-      const cur = book[openDay] || emptyEntry();
-      api.saveDay(openDay, { ...cur, ...payload });
-    }}
-  />
+  day={openDay}
+  entry={book[openDay] || emptyEntry()}
+  onClose={() => setOpenDay(null)}
+  onSave={async (localData) => {
+    const toSave = await normalizeEntryBeforeSave(openDay, localData);
+    await bookApi.saveDay(openDay, toSave);           // ← bookApi 사용
+    window.toast?.("OOTD saved!", { variant: "ok" });
+  }}
+  onDelete={async () => {
+    await bookApi.deleteDay(openDay);
+    window.toast?.("Record reset.");
+    setOpenDay(null);
+  }}
+  onMakeSwatch={async (payload) => {
+    // 스와치가 큰 문자열이면 저장 전에 업로드로 치환
+    let data = { ...payload };
+    if (data.swatchSVG && data.swatchSVG.length > 4000) {
+      data.swatchSVG = await uploadText(`swatches/${openDay}.svg`, data.swatchSVG);
+    }
+    const cur = book[openDay] || emptyEntry();
+    await bookApi.saveDay(openDay, { ...cur, ...data });
+  }}
+/>
+
 )}
     </div>
   );
@@ -940,65 +970,49 @@ const onPhotoSelected = (file) => {
     <span className="text-sm text-stone-500">{local.photo ? "File selected" : "No file chosen"}</span>
 
     <input
-      type="file"
-accept="image/jpeg,image/jpg,image/png,image/heic,image/heif,.heic,.heif,.HEIC,.HEIF"
+  type="file"
+  accept="image/jpeg,image/jpg,image/png,image/heic,image/heif,.heic,.heif,.HEIC,.HEIF"
   className="hidden"
-      onChange={async (e) => {
-const raw = e.target.files?.[0];
-if (!raw) return;
+  onChange={async (e) => {
+    const raw = e.target.files?.[0];
+    if (!raw) return;
 
-// 🔁 HEIC이면 JPEG 파일로 변환
-let file;
-try {
-  file = await ensureJpegFile(raw);
-} catch (err) {
-  console.error("HEIC convert error:", err);
-  alert("HEIC 변환에 실패했어요. 다시 시도하거나 JPG/PNG로 올려주세요.");
-  return;
-}
+    try {
+      // 1) HEIC면 JPEG 파일로 먼저 변환
+      const jpegFile = await ensureJpegFile(raw);
 
-// ⬇️ 이후 기존 로직(다운스케일 → 팔레트추출 → 상태반영)
-const jpegData = await fileToDownscaledJPEG(file, 1200, 0.85);
-// ... 생략 (dataUrlBytes 체크, 이미지 로드해 팔레트 뽑기 등)
+      // 2) 다운스케일 → dataURL
+      const jpegData = await fileToDownscaledJPEG(jpegFile, 1200, 0.85);
 
+      // 3) 팔레트 추출
+      const img = await new Promise((res, rej) => {
+        const im = new Image();
+        im.onload = () => res(im);
+        im.onerror = rej;
+        im.src = jpegData;
+      });
+      const palette = quantizeColorsFromImg(img, 4);
 
-  try {
-    // 0) HEIC이면 JPEG로 변환
-    const jpegFile = await ensureJpegFile(raw);
+      // 4) Storage 업로드 → URL만 보관
+      const photoURL = await uploadDataURL(`photos/${day}.jpg`, jpegData);
 
-    // 1) 다운스케일 + JPEG dataURL
-    const jpegData = await fileToDownscaledJPEG(jpegFile, 1200, 0.85);
-    if (!jpegData.startsWith("data:image")) {
-      throw new Error("Invalid image dataURL");
+      // 5) 상태 반영 (URL + 팔레트)
+      setLocal((prev) => ({ ...prev, photo: photoURL, palette }));
+
+      // 6) 자동 소재면 미리보기 생성
+      if (matType === "auto") {
+        const t = guessMaterialFromImg(img);
+        const colors = (local.manualColors?.length ? local.manualColors : palette);
+        const svg = makeSwatch(t, colors, Number(strength));
+        setLocal(prev => ({ ...prev, matType: t, swatchSVG: svg }));
+      }
+    } catch (err) {
+      console.error(err);
+      alert("이미지 처리에 실패했어요. 다른 파일로 다시 시도해 주세요.");
     }
-
-    // 2) 팔레트 추출 (이미지 로드)
-    await new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const palette = quantizeColorsFromImg(img, 4);
-          setLocal((prev) => ({ ...prev, photo: jpegData, palette }));
-          resolve();
-        } catch (err) {
-          console.warn("Palette extraction failed:", err);
-          setLocal((prev) => ({ ...prev, photo: jpegData }));
-          resolve();
-        }
-      };
-      img.onerror = () =>
-        reject(new Error("Failed to load the image for palette extraction"));
-      img.src = jpegData;
-    });
-  } catch (err) {
-    console.error("Image processing error:", err);
-    alert(
-      "이미지 로드/변환에 실패했어요. 다른 파일(JPG/PNG/HEIC)로 다시 시도해 주세요."
-    );
-  }
-}}
-
+  }}
 />
+
   </label>
 </section>
 
