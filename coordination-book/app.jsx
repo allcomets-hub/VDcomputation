@@ -969,57 +969,51 @@ const onPhotoSelected = (file) => {
     <span> {local.photo ? "Upload Again" : "Choose File"}</span>
     <span className="text-sm text-stone-500">{local.photo ? "File selected" : "No file chosen"}</span>
 
-    <input
+  <input
   type="file"
   accept="image/jpeg,image/jpg,image/png,image/heic,image/heif,.heic,.heif,.HEIC,.HEIF"
   className="hidden"
-onChange={async (e) => {
-  const raw = e.target.files?.[0];
-  if (!raw) return;
+  onChange={async (e) => {
+    const raw = e.target.files?.[0];
+    if (!raw) return;
 
-  // 1) HEIC -> JPEG 파일 보정
-  let file;
-  try {
-    file = await ensureJpegFile(raw);
-  } catch {
-    alert("HEIC 변환 실패. JPG/PNG로 다시 시도해 주세요.");
-    return;
-  }
+    try {
+      // 1) HEIC이면 JPEG 파일로 변환
+      const file = await ensureJpegFile(raw);
 
-  try {
-    // 2) 다운스케일 & dataURL 생성
-    const jpegData = await fileToDownscaledJPEG(file, 1200, 0.85);
+      // 2) 다운스케일 & 미리보기용 dataURL 만들기
+      const jpegData = await fileToDownscaledJPEG(file, 1200, 0.85);
 
-    // (팔레트는 로컬 dataURL로 추출)
-    const img = await new Promise((res, rej) => {
-      const im = new Image();
-      im.onload = () => res(im);
-      im.onerror = rej;
-      im.src = jpegData;
-    });
-    const palette = quantizeColorsFromImg(img, 4);
+      // 3) 팔레트 추출 (dataURL로만 처리)
+      const img = await new Promise((res, rej) => {
+        const im = new Image();
+        im.onload = () => res(im);
+        im.onerror = () => rej(new Error("Image load failed"));
+        im.src = jpegData;
+      });
+      const palette = quantizeColorsFromImg(img, 4);
 
-    // 3) Storage 업로드 후 URL만 보관  ⭐⭐
-    const path = `photos/${day}.jpg`;
-    const photoURL = await uploadDataURL(path, jpegData);
+      // 4) Storage 업로드 → HTTPS URL만 저장
+      const path = `photos/${day}.jpg`;
+      const photoURL = await uploadDataURL(path, jpegData);
 
-    // 4) 상태 갱신 (URL + 팔레트)
-    setLocal(prev => ({ ...prev, photo: photoURL, palette }));
+      // 5) 상태 갱신 (URL + 팔레트)
+      setLocal((prev) => ({ ...prev, photo: photoURL, palette }));
 
-    // 5) auto면 잠정 타입 추정 + 미리보기
-    if (matType === "auto") {
-      const t = guessMaterialFromImg(img);
-      const colors = (prev?.manualColors?.length ? prev.manualColors : palette);
-      const svg = makeSwatch(t, colors, Number(strength));
-      setLocal(prev => ({ ...prev, matType: t, swatchSVG: svg }));
+      // 6) auto면 임시 소재 추정 + 스와치 미리보기
+      if (matType === "auto") {
+        const t = guessMaterialFromImg(img);
+        const colors = (prev?.manualColors?.length ? prev.manualColors : palette) ?? palette;
+        const svg = makeSwatch(t, colors, Number(strength));
+        setLocal((prev) => ({ ...prev, matType: t, swatchSVG: svg }));
+      }
+    } catch (err) {
+      console.error("upload error:", err);
+      alert("이미지 업로드에 실패했어요. 다시 시도해 주세요.");
     }
-  } catch (err) {
-    console.error(err);
-    alert("이미지 업로드에 실패했어요.");
-  }
-}}
-
+  }}
 />
+
 
   </label>
 </section>
