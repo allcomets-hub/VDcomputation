@@ -98,6 +98,57 @@ async function ensureJpegFile(file) {
   );
 }
 
+/* ===== Tiny toast ===== */
+(function setupToast() {
+  if (document.getElementById("toast-root")) return;
+
+  const root = document.createElement("div");
+  root.id = "toast-root";
+  Object.assign(root.style, {
+    position: "fixed",
+    inset: "0 auto auto 0",
+    left: 0,
+    right: 0,
+    top: "14px",
+    display: "flex",
+    justifyContent: "center",
+    pointerEvents: "none",
+    zIndex: 9999
+  });
+  document.body.appendChild(root);
+
+  window.toast = function toast(message, { variant = "ok", duration = 1400 } = {}) {
+    const el = document.createElement("div");
+    el.textContent = message;
+    Object.assign(el.style, {
+      pointerEvents: "auto",
+      background: variant === "error" ? "#b91c1c" : variant === "info" ? "#334155" : "#111827",
+      color: "white",
+      padding: "10px 14px",
+      borderRadius: "12px",
+      boxShadow: "0 6px 20px rgba(0,0,0,.18)",
+      fontSize: "14px",
+      fontWeight: 500,
+      letterSpacing: ".2px",
+      transform: "translateY(-8px)",
+      opacity: "0",
+      transition: "all .18s ease",
+      maxWidth: "80vw",
+      whiteSpace: "pre-wrap"
+    });
+    root.appendChild(el);
+    requestAnimationFrame(() => {
+      el.style.transform = "translateY(0)";
+      el.style.opacity = "1";
+    });
+    setTimeout(() => {
+      el.style.transform = "translateY(-8px)";
+      el.style.opacity = "0";
+      setTimeout(() => el.remove(), 200);
+    }, duration);
+  };
+})();
+
 
 async function fileToDownscaledJPEG(file, maxW = 1024, quality = 0.8) {
   const img = await new Promise((res, rej) => {
@@ -140,47 +191,40 @@ function monthGrid(year,month){
   return cells;
 }
 
-// ---- Firestore 싱크 훅 ----
-// ---- Firestore 싱크 훅 (안전 가드 추가) ----
-function useCloudBook(docId = "public-book") {
-  const [book, setBook] = React.useState(null); // null = 로딩
+function useCloudBook(docId="public-book"){
+  const [book, setBook] = React.useState(null);
 
-  React.useEffect(() => {
-    // ✅ Firebase 주입되기 전이면 아무 것도 하지 않음
-    if (!window._fb || !window._fb.db || !window._fbFns || !window._fbFns.doc) return;
-
-    const F = window._fbFns;
+  React.useEffect(()=>{
+    if(!window._fb?.db || !window._fbFns?.doc) return;
+    const F   = window._fbFns;
     const ref = F.doc(window._fb.db, "books", docId);
-
     let unsub;
-    (async () => {
-      try {
-        const snap = await F.getDoc(ref);
-        if (!snap.exists()) await F.setDoc(ref, {}); // 최초 생성
-        unsub = F.onSnapshot(ref, (s) => setBook(s.exists() ? s.data() : {}));
-      } catch (e) {
-        console.error("Firestore init error:", e);
-        setBook({}); // 그래도 렌더 가능하게
-      }
+    (async ()=>{
+      const snap = await F.getDoc(ref);
+      if(!snap.exists()) await F.setDoc(ref, {});
+      unsub = F.onSnapshot(ref, s=> setBook(s.exists()? s.data(): {}));
     })();
-
-    return () => unsub && unsub();
-  }, [docId]); // Firebase 전역은 내부에서 참조
-
-  const save = React.useCallback(async (next) => {
-    setBook(next);
-    try {
-      const F = window._fbFns;
-      if (!window._fb || !F || !F.doc) return;
-      const ref = F.doc(window._fb.db, "books", docId);
-      await F.setDoc(ref, next);
-    } catch (e) {
-      console.error("save error:", e);
-    }
+    return ()=> unsub && unsub();
   }, [docId]);
 
-  return [book ?? {}, save]; // 외부에선 항상 객체로 받도록
+  const saveDay = React.useCallback(async (dayKey, data)=>{
+    setBook(prev=> ({...(prev||{}), [dayKey]: data}));
+    const F   = window._fbFns;
+    const ref = F.doc(window._fb.db, "books", docId);
+    await F.setDoc(ref, { [dayKey]: data }, { merge: true });  // ✅ 필드 머지
+  }, [docId]);
+
+  const deleteDay = React.useCallback(async (dayKey)=>{
+    setBook(prev=>{ const n={...(prev||{})}; delete n[dayKey]; return n; });
+    const F   = window._fbFns;
+    const ref = F.doc(window._fb.db, "books", docId);
+    await F.setDoc(ref, { [dayKey]: window._fbFns.deleteField() }, { merge: true }); // ✅ 필드 삭제
+  }, [docId]);
+
+  return [{...(book||{})}, { saveDay, deleteDay }];
 }
+
+
 
 
 
@@ -428,7 +472,7 @@ function App(){
   const today=new Date();
   const [year,setYear]=React.useState(today.getFullYear());
   const [month,setMonth]=React.useState(today.getMonth()+1);
-  const [book, saveBook] = useCloudBook("public-book"); // 모두가 보는 공용 문서
+  const [book, api] = useCloudBook("public-book");
 
    if (book === null) {
     return <div className="p-8">Loading...</div>;
@@ -437,12 +481,14 @@ function App(){
   const [openDay,setOpenDay]=React.useState(null);
   const cells = React.useMemo(()=>monthGrid(year, month),[year, month]);
 
-  const updateDay = (day, fn) => {
-const base = book || {};
- const cur  = base[day] || emptyEntry();
-const next = { ...base, [day]: fn(cur) };
-saveBook(next);
- };
+  // 교체 전체
+const updateDay = async (day, fn) => {
+  const base = book || {};
+  const cur  = base[day] || emptyEntry();
+  const next = fn(cur);
+  await api.saveDay(day, next); // 부분 저장(merge)
+};
+
 
   // 프린트: 스와치 컬렉션 북
 const printCollection = () => {
@@ -693,44 +739,27 @@ const entries = Object.entries(book || {})
 </div>
 
 
-      {openDay && (
-        <DetailPanel
-  day={openDay}
-  entry={book[openDay]||emptyEntry()}
-  onClose={()=>setOpenDay(null)}
-  onSave={async (u) => {
-  // 1) 스와치가 인라인 SVG면 Storage에 올리고 URL로 치환
-  let toSave = { ...u };
-  try {
-    if (u.swatchSVG && typeof u.swatchSVG === "string" && u.swatchSVG.startsWith("<svg")) {
-      const svgURL = await uploadText(`swatches/${openDay}.svg`, u.swatchSVG);
-      toSave = { ...u, swatchSVG: svgURL };
-    }
-  } catch (e) {
-    console.warn("Swatch upload failed, keep inline svg:", e);
-  }
-
-  // 2) Firestore 저장
-  const next = { ...(book || {}), [openDay]: toSave };
-  await saveBook(next);
-
-  // 3) 알림 + 자동 닫기
-  alert("OOTD saved successfully!");
-  setOpenDay(null);
-}}
-
-  onDelete={() => {
-  const n = { ...(book || {}) };
-  delete n[openDay];
-  saveBook(n);
-  alert("Record deleted successfully!");
-  setOpenDay(null);
-}}
-
-  onMakeSwatch={(payload)=>{ updateDay(openDay, cur => ({...cur, ...payload})); }}
-/>
-
-      )}
+ {openDay && (
+  <DetailPanel
+    day={openDay}
+    entry={book[openDay] || emptyEntry()}
+    onClose={() => setOpenDay(null)}
+    onSave={async (localData) => {
+      await api.saveDay(openDay, localData);
+      window.toast?.("OOTD saved!", { variant: "ok", duration: 1200 });
+      setOpenDay(null);
+    }}
+    onDelete={async () => {
+      await api.deleteDay(openDay);
+      window.toast?.("Record reset.", { variant: "ok", duration: 1200 });
+      setOpenDay(null);
+    }}
+    onMakeSwatch={(payload) => {
+      const cur = book[openDay] || emptyEntry();
+      api.saveDay(openDay, { ...cur, ...payload });
+    }}
+  />
+)}
     </div>
   );
 }
@@ -912,11 +941,26 @@ const onPhotoSelected = (file) => {
 
     <input
       type="file"
-      accept="image/jpeg,image/jpg,image/png,image/heic,image/heif,.heic,.heif"
+accept="image/jpeg,image/jpg,image/png,image/heic,image/heif,.heic,.heif,.HEIC,.HEIF"
   className="hidden"
       onChange={async (e) => {
-  const raw = e.target.files?.[0];
-  if (!raw) return;
+const raw = e.target.files?.[0];
+if (!raw) return;
+
+// 🔁 HEIC이면 JPEG 파일로 변환
+let file;
+try {
+  file = await ensureJpegFile(raw);
+} catch (err) {
+  console.error("HEIC convert error:", err);
+  alert("HEIC 변환에 실패했어요. 다시 시도하거나 JPG/PNG로 올려주세요.");
+  return;
+}
+
+// ⬇️ 이후 기존 로직(다운스케일 → 팔레트추출 → 상태반영)
+const jpegData = await fileToDownscaledJPEG(file, 1200, 0.85);
+// ... 생략 (dataUrlBytes 체크, 이미지 로드해 팔레트 뽑기 등)
+
 
   try {
     // 0) HEIC이면 JPEG로 변환
@@ -1040,14 +1084,9 @@ const onPhotoSelected = (file) => {
 /* ===== 부트스트랩 ===== */
 // ===[3. 에러 바운더리]==============================================
 class ErrorBoundary extends React.Component {
-  constructor(p) {
-    super(p);
-    this.state = { error: null };
-  }
-  static getDerivedStateFromError(err) {
-    return { error: err };
-  }
-  render() {
+  constructor(p){ super(p); this.state = { error: null }; }
+  static getDerivedStateFromError(err){ return { error: err }; }
+  render(){
     if (this.state.error) {
       return (
         <div className="p-6">
@@ -1055,19 +1094,12 @@ class ErrorBoundary extends React.Component {
             <b>렌더 오류</b><br />
             저장 데이터나 이미지 때문에 오류가 났을 수 있어요.
             <div className="mt-3 flex gap-2">
-              <button
-                className="px-3 py-2 border rounded-lg"
-                onClick={() => location.reload()}
-              >
+              <button className="px-3 py-2 border rounded-lg" onClick={()=>location.reload()}>
                 새로고침
               </button>
               <button
                 className="px-3 py-2 border rounded-lg"
-                onClick={() => {
-                  localStorage.removeItem("coordination_book_v4");
-                  location.reload();
-                }}
-              >
+                onClick={() => { localStorage.removeItem("coordination_book_v4"); location.reload(); }}>
                 저장데이터 초기화
               </button>
             </div>
@@ -1078,6 +1110,7 @@ class ErrorBoundary extends React.Component {
     return this.props.children;
   }
 }
+
 
 // ✅ 아래 두 줄이 진짜 중요함
 const root = ReactDOM.createRoot(document.getElementById("root"));
