@@ -98,57 +98,6 @@ async function ensureJpegFile(file) {
   );
 }
 
-/* ===== Tiny toast ===== */
-(function setupToast() {
-  if (document.getElementById("toast-root")) return;
-
-  const root = document.createElement("div");
-  root.id = "toast-root";
-  Object.assign(root.style, {
-    position: "fixed",
-    inset: "0 auto auto 0",
-    left: 0,
-    right: 0,
-    top: "14px",
-    display: "flex",
-    justifyContent: "center",
-    pointerEvents: "none",
-    zIndex: 9999
-  });
-  document.body.appendChild(root);
-
-  window.toast = function toast(message, { variant = "ok", duration = 1400 } = {}) {
-    const el = document.createElement("div");
-    el.textContent = message;
-    Object.assign(el.style, {
-      pointerEvents: "auto",
-      background: variant === "error" ? "#b91c1c" : variant === "info" ? "#334155" : "#111827",
-      color: "white",
-      padding: "10px 14px",
-      borderRadius: "12px",
-      boxShadow: "0 6px 20px rgba(0,0,0,.18)",
-      fontSize: "14px",
-      fontWeight: 500,
-      letterSpacing: ".2px",
-      transform: "translateY(-8px)",
-      opacity: "0",
-      transition: "all .18s ease",
-      maxWidth: "80vw",
-      whiteSpace: "pre-wrap"
-    });
-    root.appendChild(el);
-    requestAnimationFrame(() => {
-      el.style.transform = "translateY(0)";
-      el.style.opacity = "1";
-    });
-    setTimeout(() => {
-      el.style.transform = "translateY(-8px)";
-      el.style.opacity = "0";
-      setTimeout(() => el.remove(), 200);
-    }, duration);
-  };
-})();
-
 
 async function fileToDownscaledJPEG(file, maxW = 1024, quality = 0.8) {
   const img = await new Promise((res, rej) => {
@@ -963,26 +912,11 @@ const onPhotoSelected = (file) => {
 
     <input
       type="file"
-accept="image/jpeg,image/jpg,image/png,image/heic,image/heif,.heic,.heif,.HEIC,.HEIF"
+      accept="image/jpeg,image/jpg,image/png,image/heic,image/heif,.heic,.heif"
   className="hidden"
       onChange={async (e) => {
-const raw = e.target.files?.[0];
-if (!raw) return;
-
-// 🔁 HEIC이면 JPEG 파일로 변환
-let file;
-try {
-  file = await ensureJpegFile(raw);
-} catch (err) {
-  console.error("HEIC convert error:", err);
-  alert("HEIC 변환에 실패했어요. 다시 시도하거나 JPG/PNG로 올려주세요.");
-  return;
-}
-
-// ⬇️ 이후 기존 로직(다운스케일 → 팔레트추출 → 상태반영)
-const jpegData = await fileToDownscaledJPEG(file, 1200, 0.85);
-// ... 생략 (dataUrlBytes 체크, 이미지 로드해 팔레트 뽑기 등)
-
+  const raw = e.target.files?.[0];
+  if (!raw) return;
 
   try {
     // 0) HEIC이면 JPEG로 변환
@@ -1128,26 +1062,14 @@ class ErrorBoundary extends React.Component {
                 새로고침
               </button>
               <button
-  className="px-3 py-2 rounded-xl border"
-  onClick={() => {
-    // ① 즉시 팝업
-    window.toast?.("Saving OOTD…", { variant: "info", duration: 800 });
-    // ② 창 바로 닫기 (체감 속도 ↑)
-    onClose();
-    // ③ 저장은 기다리지 않고 진행
-    Promise.resolve(onSave(local))
-      .then(() => {
-        window.toast?.("OOTD saved!", { variant: "ok", duration: 1200 });
-      })
-      .catch((e) => {
-        console.error(e);
-        window.toast?.("Save failed. Please try again.", { variant: "error", duration: 1600 });
-      });
-  }}
->
-  Save
-</button>
-
+                className="px-3 py-2 border rounded-lg"
+                onClick={() => {
+                  localStorage.removeItem("coordination_book_v4");
+                  location.reload();
+                }}
+              >
+                저장데이터 초기화
+              </button>
             </div>
           </div>
         </div>
