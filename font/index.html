@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Custom Vector Font (Dreamer-style)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root { --bg:#ffd2dc; --fg:#111; }
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);font-family:system-ui, sans-serif}
+    .ui{position:fixed;left:12px;top:12px;display:flex;gap:8px;align-items:center;z-index:10}
+    input[type="text"]{padding:8px 10px;font-size:16px;border-radius:10px;border:none;min-width:260px}
+    .badge{background:#111;color:#fff;padding:6px 10px;border-radius:999px;font-size:12px}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
+</head>
+<body>
+  <div class="ui">
+    <input id="textInput" type="text" value="DREAMER TM 2025" spellcheck="false" />
+    <span class="badge">1: Thorny / 2: Pixel • [ / ] size</span>
+  </div>
+  <script src="sketch.js"></script>
+</body>
+</html>
