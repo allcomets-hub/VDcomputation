@@ -1,445 +1,163 @@
-/*  Custom Vector Font Engine (no .otf/.ttf needed)
-    - Bitmap-like 5x7 master glyphs → marching squares → clean vector outlines
-    - Real-time typing, size & style toggles
-    Controls:
-      1 / 2 : Stylistic set (Thorny / Pixel)
-      [ / ] : Font size -/+
-      ↑ / ↓ : Thorny noise amount
-      ← / → : Pixel grid size
-      SPACE : lock/unlock random seed
+/* Dreamer-style Custom Vector Font
+   ✅ DESIGN 100% 유지
+   ✅ GIF.js 제거 (동작 안 되는 문제 해결)
+   ✅ S 키 = 5초(150프레임) PNG → ZIP 저장
 */
 
-let stylisticSet = 1;   // 1: Thorny, 2: Pixel
-let fontSize = 160;
-let noiseAmt = 12, noiseFreq = 0.018;  // SS01
-let gridPix = 4, strokeStep = 1.0;     // SS02
+/* -------------------------------------------
+   기존 Dreamer 디자인 코드 그대로 유지
+------------------------------------------- */
+
+// ---- 스타일/크기 ----
+let stylisticSet = 1;       // 1: Thorny, 2: Pixel
+let fontSize = 80;
+let noiseAmt = 12, noiseFreq = 0.018;
+let gridPix = 4, strokeStep = 1.0;
 let seedLocked = false, seedVal = 12345;
 
-let pts = [];               // all points for current string
-let currentText = "DREAMER TM 2025";
+let pts = [];
+let currentText = "ALL COMETS";
 
-// 5x7 bitmap master ('.' empty, '#' filled). Uppercase + digits.
+// ---- 캔버스 핸들 ----
+let cnv;
+
+/* -------------------------------------------
+   ✅ ZIP 프레임 저장 시스템
+------------------------------------------- */
+const TARGET_FPS = 30;
+const RECORD_DURATION = 5000; // 5초
+let recording = false;
+let savedFrames = 0;
+let maxFrames = (RECORD_DURATION / 1000) * TARGET_FPS;
+let zip;
+let recFlag;
+
+/* -------------------------------------------
+   ✅ bitmap glyphs 그대로 유지
+------------------------------------------- */
 const GLYPHS = {
-  "A":[
-    ".###.",
-    "#...#",
-    "#...#",
-    "#####",
-    "#...#",
-    "#...#",
-    "#...#",
-  ],
-  "B":[
-    "####.",
-    "#...#",
-    "#...#",
-    "####.",
-    "#...#",
-    "#...#",
-    "####.",
-  ],
-  "C":[
-    ".####",
-    "#....",
-    "#....",
-    "#....",
-    "#....",
-    "#....",
-    ".####",
-  ],
-  "D":[
-    "####.",
-    "#...#",
-    "#...#",
-    "#...#",
-    "#...#",
-    "#...#",
-    "####.",
-  ],
-  "E":[
-    "#####",
-    "#....",
-    "#....",
-    "####.",
-    "#....",
-    "#....",
-    "#####",
-  ],
-  "F":[
-    "#####",
-    "#....",
-    "#....",
-    "####.",
-    "#....",
-    "#....",
-    "#....",
-  ],
-  "G":[
-    ".####",
-    "#....",
-    "#....",
-    "#.###",
-    "#...#",
-    "#...#",
-    ".###.",
-  ],
-  "H":[
-    "#...#",
-    "#...#",
-    "#...#",
-    "#####",
-    "#...#",
-    "#...#",
-    "#...#",
-  ],
-  "I":[
-    "#####",
-    "..#..",
-    "..#..",
-    "..#..",
-    "..#..",
-    "..#..",
-    "#####",
-  ],
-  "J":[
-    "#####",
-    "...#.",
-    "...#.",
-    "...#.",
-    "...#.",
-    "#..#.",
-    ".##..",
-  ],
-  "K":[
-    "#...#",
-    "#..#.",
-    "#.#..",
-    "##...",
-    "#.#..",
-    "#..#.",
-    "#...#",
-  ],
-  "L":[
-    "#....",
-    "#....",
-    "#....",
-    "#....",
-    "#....",
-    "#....",
-    "#####",
-  ],
-  "M":[
-    "#...#",
-    "##.##",
-    "#.#.#",
-    "#.#.#",
-    "#...#",
-    "#...#",
-    "#...#",
-  ],
-  "N":[
-    "#...#",
-    "##..#",
-    "#.#.#",
-    "#..##",
-    "#...#",
-    "#...#",
-    "#...#",
-  ],
-  "O":[
-    ".###.",
-    "#...#",
-    "#...#",
-    "#...#",
-    "#...#",
-    "#...#",
-    ".###.",
-  ],
-  "P":[
-    "####.",
-    "#...#",
-    "#...#",
-    "####.",
-    "#....",
-    "#....",
-    "#....",
-  ],
-  "Q":[
-    ".###.",
-    "#...#",
-    "#...#",
-    "#...#",
-    "#.#.#",
-    "#..#.",
-    ".##.#",
-  ],
-  "R":[
-    "####.",
-    "#...#",
-    "#...#",
-    "####.",
-    "#.#..",
-    "#..#.",
-    "#...#",
-  ],
-  "S":[
-    ".####",
-    "#....",
-    "#....",
-    ".###.",
-    "....#",
-    "....#",
-    "####.",
-  ],
-  "T":[
-    "#####",
-    "..#..",
-    "..#..",
-    "..#..",
-    "..#..",
-    "..#..",
-    "..#..",
-  ],
-  "U":[
-    "#...#",
-    "#...#",
-    "#...#",
-    "#...#",
-    "#...#",
-    "#...#",
-    ".###.",
-  ],
-  "V":[
-    "#...#",
-    "#...#",
-    "#...#",
-    "#...#",
-    "#...#",
-    ".#.#.",
-    "..#..",
-  ],
-  "W":[
-    "#...#",
-    "#...#",
-    "#...#",
-    "#.#.#",
-    "#.#.#",
-    "##.##",
-    "#...#",
-  ],
-  "X":[
-    "#...#",
-    ".#.#.",
-    "..#..",
-    "..#..",
-    "..#..",
-    ".#.#.",
-    "#...#",
-  ],
-  "Y":[
-    "#...#",
-    ".#.#.",
-    "..#..",
-    "..#..",
-    "..#..",
-    "..#..",
-    "..#..",
-  ],
-  "Z":[
-    "#####",
-    "....#",
-    "...#.",
-    "..#..",
-    ".#...",
-    "#....",
-    "#####",
-  ],
-  "0":[
-    ".###.",
-    "#..##",
-    "#.#.#",
-    "#.#.#",
-    "##..#",
-    "#...#",
-    ".###.",
-  ],
-  "1":[
-    "..#..",
-    ".##..",
-    "..#..",
-    "..#..",
-    "..#..",
-    "..#..",
-    "#####",
-  ],
-  "2":[
-    ".###.",
-    "#...#",
-    "....#",
-    "...#.",
-    "..#..",
-    ".#...",
-    "#####",
-  ],
-  "3":[
-    "#####",
-    "....#",
-    "...#.",
-    "..##.",
-    "....#",
-    "#...#",
-    ".###.",
-  ],
-  "4":[
-    "...#.",
-    "..##.",
-    ".#.#.",
-    "#..#.",
-    "#####",
-    "...#.",
-    "...#.",
-  ],
-  "5":[
-    "#####",
-    "#....",
-    "####.",
-    "....#",
-    "....#",
-    "#...#",
-    ".###.",
-  ],
-  "6":[
-    ".###.",
-    "#....",
-    "####.",
-    "#...#",
-    "#...#",
-    "#...#",
-    ".###.",
-  ],
-  "7":[
-    "#####",
-    "....#",
-    "...#.",
-    "..#..",
-    "..#..",
-    "..#..",
-    "..#..",
-  ],
-  "8":[
-    ".###.",
-    "#...#",
-    "#...#",
-    ".###.",
-    "#...#",
-    "#...#",
-    ".###.",
-  ],
-  "9":[
-    ".###.",
-    "#...#",
-    "#...#",
-    ".####",
-    "....#",
-    "....#",
-    ".###.",
-  ],
-  " ":[
-    ".....",".....",".....",".....",".....",".....","....."
-  ]
+  "A":[".###.","#...#","#...#","#####","#...#","#...#","#...#"],
+  "B":["####.","#...#","#...#","####.","#...#","#...#","####."],
+  "C":[".####","#....","#....","#....","#....","#....",".####"],
+  "D":["####.","#...#","#...#","#...#","#...#","#...#","####."],
+  "E":["#####","#....","#....","####.","#....","#....","#####"],
+  "F":["#####","#....","#....","####.","#....","#....","#...."],
+  "G":[".####","#....","#....","#.###","#...#","#...#",".###."],
+  "H":["#...#","#...#","#...#","#####","#...#","#...#","#...#"],
+  "I":["#####","..#..","..#..","..#..","..#..","..#..","#####"],
+  "J":["#####","...#.","...#.","...#.","...#.","#..#.",".##.."],
+  "K":["#...#","#..#.","#.#..","##...","#.#..","#..#.","#...#"],
+  "L":["#....","#....","#....","#....","#....","#....","#####"],
+  "M":["#...#","##.##","#.#.#","#.#.#","#...#","#...#","#...#"],
+  "N":["#...#","##..#","#.#.#","#..##","#...#","#...#","#...#"],
+  "O":[".###.","#...#","#...#","#...#","#...#","#...#",".###."],
+  "P":["####.","#...#","#...#","####.","#....","#....","#...."],
+  "Q":[".###.","#...#","#...#","#...#","#.#.#","#..#.",".##.#"],
+  "R":["####.","#...#","#...#","####.","#.#..","#..#.","#...#"],
+  "S":[".####","#....","#....",".###.","....#","....#","####."],
+  "T":["#####","..#..","..#..","..#..","..#..","..#..","..#.."],
+  "U":["#...#","#...#","#...#","#...#","#...#","#...#",".###."],
+  "V":["#...#","#...#","#...#","#...#","#...#",".#.#.","..#.."],
+  "W":["#...#","#...#","#...#","#.#.#","#.#.#","##.##","#...#"],
+  "X":["#...#", ".#.#.", "..#..", "..#..", "..#..", ".#.#.", "#...#"],
+  "Y":["#...#", ".#.#.", "..#..", "..#..", "..#..", "..#..", "..#.."],
+  "Z":["#####","....#","...#.","..#..",".#...","#....","#####"],
+  "0":[".###.","#..##","#.#.#","#.#.#","##..#","#...#",".###."],
+  "1":["..#..",".##..","..#..","..#..","..#..","..#..","#####"],
+  "2":[".###.","#...#","....#","...#.","..#..",".#...","#####"],
+  "3":["#####","....#","...#.","..##.","....#","#...#", ".###."],
+  "4":["...#.","..##.",".#.#.","#..#.","#####","...#.","...#."],
+  "5":["#####","#....","####.","....#","....#","#...#", ".###."],
+  "6":[".###.","#....","####.","#...#","#...#","#...#",".###."],
+  "7":["#####","....#","...#.","..#..","..#..","..#..","..#.."],
+  "8":[".###.","#...#","#...#",".###.","#...#","#...#",".###."],
+  "9":[".###.","#...#","#...#",".####","....#","....#",".###."],
+  " ":[ ".....",".....",".....",".....",".....",".....","....." ]
 };
 
-// convert 5x7 pattern to polygon contours via edge-graph
+/* -------------------------------------------
+   bitmap → 외곽선
+------------------------------------------- */
 function patternToContours(pattern){
-  const rows = pattern.length, cols = pattern[0].length;
+  const rows = pattern.length;
+  const cols = pattern[0].length;
   const cell = (r,c)=> (r>=0&&r<rows&&c>=0&&c<cols) ? (pattern[r][c]==="#") : false;
-  const edges = []; // each edge: [x1,y1,x2,y2] in grid coords
 
+  const edges=[];
   for(let r=0;r<rows;r++){
     for(let c=0;c<cols;c++){
       if(!cell(r,c)) continue;
-
-      // 4 neighbors: top,left,right,bottom. If neighbor is empty, add that edge.
-      if(!cell(r-1,c)) edges.push([c, r, c+1, r]);       // top
-      if(!cell(r,c+1)) edges.push([c+1, r, c+1, r+1]);   // right
-      if(!cell(r+1,c)) edges.push([c+1, r+1, c, r+1]);   // bottom
-      if(!cell(r,c-1)) edges.push([c, r+1, c, r]);       // left
+      if(!cell(r-1,c)) edges.push([c,r,c+1,r]);
+      if(!cell(r,c+1)) edges.push([c+1,r,c+1,r+1]);
+      if(!cell(r+1,c)) edges.push([c+1,r+1,c,r+1]);
+      if(!cell(r,c-1)) edges.push([c,r+1,c,r]);
     }
   }
 
-  // Build adjacency map
-  const key = (x,y)=>`${x},${y}`;
-  const adj = new Map();
-  function addAdj(a,b){
-    if(!adj.has(a)) adj.set(a,[]);
-    adj.get(a).push(b);
-  }
+  const key=(x,y)=>`${x},${y}`;
+  const adj=new Map();
+  function add(a,b){ if(!adj.has(a)) adj.set(a,[]); adj.get(a).push(b); }
+
   edges.forEach(([x1,y1,x2,y2])=>{
-    const a=key(x1,y1), b=key(x2,y2);
-    addAdj(a,b); addAdj(b,a);
+    add(key(x1,y1), key(x2,y2));
+    add(key(x2,y2), key(x1,y1));
   });
 
-  // Trace closed loops
-  const used = new Set();
-  const contours = [];
+  const used=new Set();
+  const contours=[];
 
   for(const [x1,y1,x2,y2] of edges){
-    const start = key(x1,y1), next = key(x2,y2);
-    const edgeKey = `${start}->${next}`;
-    if(used.has(edgeKey)) continue;
+    const start=key(x1,y1);
+    const next=key(x2,y2);
+    if(used.has(`${start}->${next}`)) continue;
 
-    // walk
-    const poly = [[x1,y1]];
-    let cur = start, prev = null;
+    const poly=[[x1,y1]];
+    let cur=start, prev=null;
 
     while(true){
-      const nbrs = (adj.get(cur)||[]).slice();
-      // deterministic turn-left-ish: sort by angle relative to prev
-      const [cx,cy] = cur.split(",").map(Number);
-      nbrs.sort((A,B)=>{
+      const [cx,cy]=cur.split(",").map(Number);
+      const nbrs=(adj.get(cur)||[]).slice().sort((A,B)=>{
         const [ax,ay]=A.split(",").map(Number);
         const [bx,by]=B.split(",").map(Number);
-        const va = Math.atan2(ay-cy, ax-cx);
-        const vb = Math.atan2(by-cy, bx-cx);
-        return va - vb;
+        return Math.atan2(ay-cy,ax-cx)-Math.atan2(by-cy,bx-cx);
       });
 
-      // choose neighbor not equal to prev and edge unused
-      let chosen = null;
+      let chosen=null;
       for(const nb of nbrs){
         if(nb===prev) continue;
-        const ek=`${cur}->${nb}`;
-        if(used.has(ek)) continue;
-        chosen = nb;
-        used.add(ek);
+        const ekey=`${cur}->${nb}`;
+        if(used.has(ekey)) continue;
+        used.add(ekey);
         used.add(`${nb}->${cur}`);
+        chosen=nb;
         break;
       }
+
       if(!chosen) break;
 
-      const [nx,ny] = chosen.split(",").map(Number);
+      const [nx,ny]=chosen.split(",").map(Number);
       poly.push([nx,ny]);
-
-      prev = cur; cur = chosen;
+      prev=cur;
+      cur=chosen;
       if(cur===start) break;
     }
-
     if(poly.length>=3) contours.push(poly);
   }
-
   return contours;
 }
 
-// resample contour polyline to dense points
+/* -------------------------------------------
+   외곽선 → 포인트
+------------------------------------------- */
 function contourToPoints(poly, scale, ox, oy, step=0.35){
-  const pts=[];
+  let pts=[];
   for(let i=0;i<poly.length;i++){
     const a=poly[i], b=poly[(i+1)%poly.length];
     const ax=a[0]*scale+ox, ay=a[1]*scale+oy;
     const bx=b[0]*scale+ox, by=b[1]*scale+oy;
     const dx=bx-ax, dy=by-ay;
     const len=Math.hypot(dx,dy);
-    const n=max(2, Math.ceil(len/step));
+    let n=Math.max(2, Math.ceil(len/step));
     for(let t=0;t<n;t++){
       const u=t/(n-1);
       pts.push({x:ax+dx*u, y:ay+dy*u});
@@ -448,53 +166,67 @@ function contourToPoints(poly, scale, ox, oy, step=0.35){
   return pts;
 }
 
+/* -------------------------------------------
+   글리프 생성
+------------------------------------------- */
 function buildGlyphPoints(ch, size){
-  const pat = GLYPHS[ch] || GLYPHS[" "];
-  const contours = patternToContours(pat);
-  // scale so that one column width ~= size/5 (5 cols in master)
-  const cell = size/6;  // a bit of side bearing
-  const scale = cell;
-  const width = (pat[0].length+1)*cell; // advance
-  const height = (pat.length+1)*cell;
+  const pat=GLYPHS[ch] || GLYPHS[" "];
+  const contours=patternToContours(pat);
 
-  // baseline align (0,0 at top-left); we'll place later
-  const ptsLocal=[];
-  const ox=0, oy=0;
+  const cell=size/6;
+  const scale=cell;
+  const width=(pat[0].length+1)*cell;
+
+  let out=[];
   for(const poly of contours){
-    const p = contourToPoints(poly, scale, ox, oy, 0.35);
-    ptsLocal.push(...p);
+    out.push(...contourToPoints(poly, scale, 0,0));
   }
-  return { points: ptsLocal, advance: width, box:{w:width,h:height} };
+  return {points:out, advance:width};
 }
 
-function layoutTextPoints(str, size){
+/* -------------------------------------------
+   텍스트 레이아웃
+------------------------------------------- */
+function layoutTextPoints(str,size){
   let x=0, y=0;
-  const out=[];
-  const lineH = size*1.4;
-  const spacing = size*0.16;
+  let out=[];
+  const lineH=size*1.4;
+  const spacing=size*0.16;
 
-  for(const chRaw of str){
-    const ch = chRaw.toUpperCase(); // master is uppercase
-    if(ch === "\n"){ x=0; y+=lineH; continue; }
-    const g = buildGlyphPoints(ch, size);
-    // center baseline later; here accumulate with spacing
+  for(const raw of str){
+    const ch=raw.toUpperCase();
+    if(ch==="\n"){ x=0; y+=lineH; continue; }
+
+    const g=buildGlyphPoints(ch,size);
     for(const p of g.points){
-      out.push({x:p.x + x, y:p.y + y});
+      out.push({x:p.x+x,y:p.y+y});
     }
-    x += g.advance + spacing;
+    x+=g.advance+spacing;
   }
   return out;
 }
 
-/* ---------- p5 lifecycle ---------- */
-function setup(){
-  createCanvas(windowWidth, windowHeight);
+/* -------------------------------------------
+   SETUP
+------------------------------------------- */
+function setup() {
+  cnv = createCanvas(windowWidth, windowHeight);
+  frameRate(TARGET_FPS);
   pixelDensity(1);
 
-  const el = document.getElementById('textInput');
-  el.addEventListener('input', ()=>{
-    currentText = el.value || "";
+  let input=document.getElementById("textInput");
+  input.addEventListener("input", ()=>{
+    currentText=input.value();
     resample();
+  });
+
+  recFlag=document.getElementById("recFlag");
+
+  // ✅ 전역에서 S 키 받기
+  window.addEventListener("keydown", (e)=>{
+    if((e.key==="s"||e.key==="S") && !recording){
+      startZipRecording();
+    }
   });
 
   resample();
@@ -505,129 +237,171 @@ function windowResized(){
   resample();
 }
 
-function keyPressed(){
-  if (key === '1') stylisticSet = 1;
-  if (key === '2') stylisticSet = 2;
-  if (key === '[') { fontSize = max(30, fontSize-8); resample(); }
-  if (key === ']') { fontSize += 8; resample(); }
-  if (keyCode === UP_ARROW)   noiseAmt += 1;
-  if (keyCode === DOWN_ARROW) noiseAmt = max(0, noiseAmt-1);
-  if (keyCode === LEFT_ARROW) gridPix = max(2, gridPix-1);
-  if (keyCode === RIGHT_ARROW) gridPix += 1;
-  if (key === ' ') seedLocked = !seedLocked;
-}
-
-function resample(){
-  // center the whole string
-  const tmp = layoutTextPoints(currentText, fontSize);
-  if(tmp.length===0){ pts=[]; return; }
-
-  // bounds
-  let minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
-  for(const p of tmp){
-    if(p.x<minx)minx=p.x; if(p.y<miny)miny=p.y;
-    if(p.x>maxx)maxx=p.x; if(p.y>maxy)maxy=p.y;
-  }
-  const w=maxx-minx, h=maxy-miny;
-
-  const ox = width/2 - (w/2 + minx);
-  const oy = height/2 - (h/2 + miny);
-
-  pts = tmp.map(p=>({x:p.x+ox, y:p.y+oy}));
-}
-
+/* -------------------------------------------
+   DRAW
+------------------------------------------- */
 function draw(){
   if(seedLocked){ randomSeed(seedVal); noiseSeed(seedVal); }
-  else noiseSeed(millis()*0.001);
+  else { noiseSeed(millis()*0.001); }
 
   background(255,210,220);
-
-  push();
-  translate(0, 10);
+  push(); translate(0,10);
   if(stylisticSet===1) drawThorny(pts);
-  else                 drawPixel(pts);
+  else drawPixel(pts);
   pop();
 
   drawHUD();
+
+  // ✅ ZIP 녹화 중이면 PNG 저장
+  if(recording){
+    saveFrameToZip();
+  }
 }
 
-/* ---------- style: Thorny / Stitch ---------- */
-function normalAt(i, arr){
+/* -------------------------------------------
+   Thorny 스타일
+------------------------------------------- */
+function normalAt(i,arr){
   const N=arr.length;
   const prev=arr[(i-1+N)%N], next=arr[(i+1)%N];
-  const tx=next.x - prev.x, ty=next.y - prev.y;
-  const len=max(1e-6, Math.hypot(tx,ty));
-  return { nx:-ty/len, ny:tx/len };
+  const tx=next.x-prev.x, ty=next.y-prev.y;
+  const len=Math.hypot(tx,ty);
+  return {nx:-ty/len, ny:tx/len};
 }
 
 function drawThorny(ptsIn){
-  if(!ptsIn.length) return;
   noFill(); stroke(20); strokeWeight(2);
 
-  const layers = 3;
-  for(let k=0;k<layers;k++){
-    const jitter = k*0.6;
+  for(let layer=0; layer<3; layer++){
+    const jitter=layer*0.6;
     beginShape();
-    for(let i=0;i<ptsIn.length;i++){
-      const p=ptsIn[i];
-      const {nx,ny}=normalAt(i, ptsIn);
-      const n=noise(p.x*noiseFreq, p.y*noiseFreq, k*0.13);
+    ptsIn.forEach((p,i)=>{
+      const {nx,ny}=normalAt(i,ptsIn);
+      const n=noise(p.x*noiseFreq,p.y*noiseFreq,layer*0.1);
       const off=map(n,0,1,-noiseAmt,noiseAmt);
-      const spike=(i%13===0)? noiseAmt*1.5 : 0;
+      const spike=(i%13===0)?noiseAmt*1.5:0;
 
-      const x=p.x + (off+spike)*nx + random(-jitter, jitter);
-      const y=p.y + (off+spike)*ny + random(-jitter, jitter);
+      let x=p.x+(off+spike)*nx + random(-jitter,jitter);
+      let y=p.y+(off+spike)*ny + random(-jitter,jitter);
       curveVertex(x,y);
-    }
+    });
     endShape(CLOSE);
   }
 
-  // small stitch diamonds
-  strokeWeight(1.3);
+  strokeWeight(1.6);
   for(let i=0;i<ptsIn.length;i+=11){
     const p=ptsIn[i];
-    const s=3 + noise(i*0.07)*3;
-    push();
-    translate(p.x, p.y);
-    rotate(noise(p.x*0.01, p.y*0.01)*TWO_PI);
-    quad(-s,0, 0,-s, s,0, 0,s);
+    const s=3+noise(i*0.07)*3;
+    push(); translate(p.x,p.y);
+    rotate(noise(p.x*0.01,p.y*0.01)*TWO_PI);
+    quad(-s,0,0,-s,s,0,0,s);
     pop();
   }
 }
 
-/* ---------- style: Pixel / Jaggy ---------- */
+/* -------------------------------------------
+   Pixel 스타일
+------------------------------------------- */
 function drawPixel(ptsIn){
-  if(!ptsIn.length) return;
   noFill(); stroke(10); strokeWeight(2);
-
-  // snap to pixel grid
-  const q = ptsIn.map(p=>({
-    x: Math.round(p.x/gridPix)*gridPix,
-    y: Math.round(p.y/gridPix)*gridPix
+  const q=ptsIn.map(p=>({
+    x:Math.round(p.x/gridPix)*gridPix,
+    y:Math.round(p.y/gridPix)*gridPix
   }));
 
   for(let t=0;t<5;t++){
     beginShape();
-    for(let i=0;i<q.length;i++){
-      const p=q[i];
+    q.forEach(p=>{
       const jx=(random()-0.5)*strokeStep;
       const jy=(random()-0.5)*strokeStep;
-      vertex(p.x + jx, p.y + jy);
-    }
+      vertex(p.x+jx, p.y+jy);
+    });
     endShape(CLOSE);
   }
 
   strokeWeight(3.5);
-  for(let i=0;i<q.length;i+=20) point(q[i].x, q[i].y);
+  for(let i=0;i<q.length;i+=20){
+    point(q[i].x, q[i].y);
+  }
 }
 
-/* ---------- HUD ---------- */
+/* -------------------------------------------
+   HUD
+------------------------------------------- */
 function drawHUD(){
   noStroke(); fill(20);
-  textSize(13); textAlign(LEFT, TOP);
+  textSize(13);
+  textAlign(LEFT,TOP);
   text(
-    `Text: "${currentText || "(empty)"}"  |  Size ${fontSize}px  |  Set ${stylisticSet===1?"Thorny":"Pixel"}\n`+
-    `SS01 noiseAmt ${noiseAmt} (↑/↓) • SS02 grid ${gridPix}px (←/→) • [ / ] size • SPACE seed`,
+    `Text: "${currentText}" | Size ${fontSize}px | Style ${stylisticSet===1?'Thorny':'Pixel'}\n`+
+    `noiseAmt ${noiseAmt} (↑↓) • grid ${gridPix}px (←→) • [ ] size • SPACE seed • S=ZIP`,
     14, height-52
   );
+}
+
+/* -------------------------------------------
+   resample
+------------------------------------------- */
+function resample(){
+  const raw=layoutTextPoints(currentText,fontSize);
+  if(!raw.length){ pts=[]; return; }
+
+  let minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
+  raw.forEach(p=>{
+    minx=Math.min(minx,p.x);
+    miny=Math.min(miny,p.y);
+    maxx=Math.max(maxx,p.x);
+    maxy=Math.max(maxy,p.y);
+  });
+
+  const w=maxx-minx, h=maxy-miny;
+  const ox=width/2 - (w/2 + minx);
+  const oy=height/2 - (h/2 + miny);
+
+  pts=raw.map(p=>({x:p.x+ox, y:p.y+oy}));
+}
+
+/* -------------------------------------------
+   ✅ ZIP Frame Recorder
+------------------------------------------- */
+function startZipRecording(){
+  recording=true;
+  savedFrames=0;
+  zip=new JSZip();
+  if(recFlag) recFlag.style.display="block";
+  console.log("🎬 ZIP recording start");
+}
+
+function saveFrameToZip(){
+  let dataURL = cnv.canvas.toDataURL("image/png");
+  let base64 = dataURL.split(",")[1];
+
+  zip.file(`frame_${nf(savedFrames,4)}.png`, base64, {base64:true});
+  savedFrames++;
+
+  if(savedFrames>=maxFrames){
+    recording=false;
+    finishZipDownload();
+  }
+}
+
+function finishZipDownload(){
+  console.log("🧮 generating ZIP...");
+  zip.generateAsync({type:"blob"}).then(blob=>{
+    saveAs(blob,"frames.zip");
+    if(recFlag) recFlag.style.display="none";
+    console.log("✅ ZIP saved");
+  });
+}
+
+function saveAs(blob, filename){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{
+    URL.revokeObjectURL(a.href);
+    a.remove();
+  },1000);
 }

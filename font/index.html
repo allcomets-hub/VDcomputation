@@ -2,23 +2,35 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Custom Vector Font (Dreamer-style)</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <style>
-    :root { --bg:#ffd2dc; --fg:#111; }
-    html,body{height:100%}
-    body{margin:0;background:var(--bg);font-family:system-ui, sans-serif}
-    .ui{position:fixed;left:12px;top:12px;display:flex;gap:8px;align-items:center;z-index:10}
-    input[type="text"]{padding:8px 10px;font-size:16px;border-radius:10px;border:none;min-width:260px}
-    .badge{background:#111;color:#fff;padding:6px 10px;border-radius:999px;font-size:12px}
-  </style>
+  <title>Dreamer ZIP Recorder</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+
+  <!-- p5.js -->
   <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
+
+  <!-- JSZip for frame ZIP -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+  <!-- helper -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip-utils@0.1.0/dist/jszip-utils.min.js"></script>
+
+  <style>
+    body { margin:0; background:#ffd2dc; font-family:sans-serif; }
+    .ui{ position:fixed; left:12px; top:12px; display:flex; gap:8px; z-index:9999 }
+    input[type=text]{ padding:8px 10px; border-radius:8px; border:none; font-size:16px; min-width:260px }
+    .badge{padding:6px 10px;background:#111;color:#fff;border-radius:999px;font-size:12px;}
+    .rec{position:fixed;right:12px;top:12px;background:#c1121f;color:#fff;padding:6px 10px;
+         border-radius:6px;font-size:12px;display:none;z-index:9999;}
+  </style>
 </head>
+
 <body>
   <div class="ui">
-    <input id="textInput" type="text" value="DREAMER TM 2025" spellcheck="false" />
-    <span class="badge">1: Thorny / 2: Pixel • [ / ] size</span>
+    <input id="textInput" type="text" value="ALL COMETS" />
+    <span class="badge">1/2 style • [ ] size • ↑↓ noise • ←→ grid • SPACE seed • S = ZIP frames</span>
   </div>
+  <div id="recFlag" class="rec">REC… saving frames</div>
+
   <script src="sketch.js"></script>
 </body>
 </html>
