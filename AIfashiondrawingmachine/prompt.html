@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prompt Mixer</title>
+
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/mixer.css">
+
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@300;400&family=Inter:wght@200;300;400&display=swap" rel="stylesheet">
+</head>
+
+<body class="mixer-page">
+
+    <header>
+        <div class="logo">PROMPT MIXER</div>
+    </header>
+
+    <section class="controls">
+
+        <div class="control-block">
+            <h3>Mood</h3>
+            <select id="moodSelect">
+                <option value="">Select mood</option>
+                <option>Calm</option>
+                <option>Bold</option>
+                <option>Chaotic</option>
+                <option>Soft Romantic</option>
+                <option>Mysterious</option>
+                <option>Minimal</option>
+            </select>
+        </div>
+
+        <div class="control-block">
+            <h3>Color Palette</h3>
+            <input type="color" id="color1" value="#d9d9d9">
+            <input type="color" id="color2" value="#bdbdbd">
+            <input type="color" id="color3" value="#2b2b2b">
+        </div>
+
+        <div class="control-block">
+            <h3>Pattern</h3>
+            <select id="patternSelect">
+                <option value="">Select pattern</option>
+                <option>Organic Flow</option>
+                <option>Geometric</option>
+                <option>Pleated</option>
+                <option>Draped</option>
+                <option>Layered</option>
+                <option>Sculptural</option>
+            </select>
+        </div>
+
+        <button id="generateBtn" class="generate-btn">GENERATE PROMPT</button>
+    </section>
+
+    <section class="prompt-box">
+        <h3>Generated Prompt</h3>
+        <textarea id="promptOutput" readonly></textarea>
+        <button id="copyBtn" class="copy-btn">COPY</button>
+    </section>
+
+    <section class="dropzone-section">
+        <h3>Drag & Drop Your Runway Images</h3>
+        <div id="dropzone" class="dropzone">Drop images here</div>
+    </section>
+
+    <section class="gallery" id="gallery"></section>
+
+    <script src="js/mixer.js"></script>
+</body>
+</html>
