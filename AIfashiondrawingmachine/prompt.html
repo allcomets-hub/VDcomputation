@@ -3,71 +3,110 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prompt Mixer</title>
+    <title>PROMPT LAB — AI FASHION DRAWING MACHINE</title>
 
-    <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="css/mixer.css">
-
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@300;400&family=Inter:wght@200;300;400&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/ai_prompt.css">
 </head>
 
-<body class="mixer-page">
+<body class="prompt-page">
 
-    <header>
-        <div class="logo">PROMPT MIXER</div>
-    </header>
+    <div class="dots"></div>
 
-    <section class="controls">
+    <a href="index.html" class="back-btn">← BACK</a>
 
-        <div class="control-block">
-            <h3>Mood</h3>
-            <select id="moodSelect">
-                <option value="">Select mood</option>
-                <option>Calm</option>
-                <option>Bold</option>
-                <option>Chaotic</option>
-                <option>Soft Romantic</option>
-                <option>Mysterious</option>
-                <option>Minimal</option>
-            </select>
+    <div class="collage">
+        <img src="assets/5.jpg" class="lab-img img19">
+        <img src="assets/6.jpg" class="lab-img img28">
+        <img src="assets/7.jpg" class="lab-img img29">
+
+        <div class="title-block">
+            <h1 class="main-title">✷ AI FASHION<br>DRAWING LAB</h1>
+        </div>
+    </div>
+
+    <!-- WRAPPER (모든 패널 + 출력 포함) -->
+    <div class="content-wrapper">
+
+        <!-- PANEL -->
+        <div class="panel">
+
+            <div class="panel-section">
+                <label>MOOD</label>
+                <div class="dropdown" data-type="mood">
+                    <div class="dropdown-selected">Select</div>
+                    <div class="dropdown-options">
+                 
+<div class="option">Soft</div>
+<div class="option">Fresh</div>
+<div class="option">Luxury</div>
+<div class="option">Neutral</div>
+<div class="option">Warm Blush</div>
+       <div class="option">Dreamy Pastel</div>
+<div class="option">Elegant Aura</div>
+<div class="option">Minimal Chic</div>
+<div class="option">Couture Bloom</div>
+<div class="option">Radiant Beauty</div>
+<div class="option">Glow Aesthetic</div>
+<div class="option">Romantic Light</div>
+<div class="option">Glossy Editorial</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <label>COLOR PALETTE</label>
+                <div class="colors">
+                    <input type="color" id="color1" value="#ff4d4d">
+                    <input type="color" id="color2" value="#cc0000">
+                    <input type="color" id="color3" value="#660000">
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <label>TEXTILE</label>
+                <div class="dropdown" data-type="pattern">
+                    <div class="dropdown-selected">Select</div>
+                    <div class="dropdown-options">
+                 <div class="option">Silk Satin</div>
+<div class="option">Silk Crepe</div>
+<div class="option">Organza</div>
+<div class="option">Chiffon</div>
+<div class="option">Taffeta</div>
+<div class="option">Wool Crepe</div>
+<div class="option">Tweed</div>
+<div class="option">Lace</div>
+<div class="option">Jacquard</div>
+<div class="option">Brocade</div>
+<div class="option">Gabardine</div>
+<div class="option">Cotton Poplin</div>
+
+
+                    </div>
+                </div>
+            </div>
+
         </div>
 
-        <div class="control-block">
-            <h3>Color Palette</h3>
-            <input type="color" id="color1" value="#d9d9d9">
-            <input type="color" id="color2" value="#bdbdbd">
-            <input type="color" id="color3" value="#2b2b2b">
-        </div>
+        <button id="generateBtn" class="generate-btn">Generate</button>
 
-        <div class="control-block">
-            <h3>Pattern</h3>
-            <select id="patternSelect">
-                <option value="">Select pattern</option>
-                <option>Organic Flow</option>
-                <option>Geometric</option>
-                <option>Pleated</option>
-                <option>Draped</option>
-                <option>Layered</option>
-                <option>Sculptural</option>
-            </select>
-        </div>
+        <!-- OUTPUT -->
+        <section class="output">
+            <label>PROMPT</label>
+            <textarea id="promptOutput" readonly></textarea>
+            <button id="copyBtn" class="copy-btn">Copy & Open AI machine</button>
+        </section>
 
-        <button id="generateBtn" class="generate-btn">GENERATE PROMPT</button>
-    </section>
+        <!-- DROPZONE -->
+        <section class="dropzone-area">
+            <label>DROP IMAGES</label>
+            <div id="dropzone" class="dropzone">Drag & Drop runway images</div>
+            <div id="gallery" class="gallery"></div>
+        </section>
 
-    <section class="prompt-box">
-        <h3>Generated Prompt</h3>
-        <textarea id="promptOutput" readonly></textarea>
-        <button id="copyBtn" class="copy-btn">COPY</button>
-    </section>
-
-    <section class="dropzone-section">
-        <h3>Drag & Drop Your Runway Images</h3>
-        <div id="dropzone" class="dropzone">Drop images here</div>
-    </section>
-
-    <section class="gallery" id="gallery"></section>
+    </div>
 
     <script src="js/mixer.js"></script>
+
 </body>
 </html>

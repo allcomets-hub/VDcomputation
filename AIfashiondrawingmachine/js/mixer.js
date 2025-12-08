@@ -1,100 +1,114 @@
-// Generate Prompt
-document.getElementById("generateBtn").addEventListener("click", () => {
-    let mood = document.getElementById("moodSelect").value;
-    let pattern = document.getElementById("patternSelect").value;
+/* ----------------------------------------
+   CUSTOM DROPDOWN
+-----------------------------------------*/
 
-    let c1 = document.getElementById("color1").value;
-    let c2 = document.getElementById("color2").value;
-    let c3 = document.getElementById("color3").value;
+document.querySelectorAll(".dropdown").forEach(drop => {
+    const selected = drop.querySelector(".dropdown-selected");
+    const options = drop.querySelector(".dropdown-options");
 
-    let prompt = `
-high-fashion runway show, model walking confidently on the catwalk,
-full-body mid-stride pose, dynamic movement,
-Paris Fashion Week environment, long runway perspective,
-audience on both sides, glossy reflective runway floor,
-fashion show spotlighting, dramatic cinematic lighting,
-mood: ${mood},
-color palette: ${c1}, ${c2}, ${c3},
-pattern style: ${pattern},
-shot from front-row photographer perspective,
-8k ultra-detailed, fashion runway photography
-`.trim();
+    selected.addEventListener("click", () => {
+        drop.classList.toggle("open");
+    });
 
-    document.getElementById("promptOutput").value = prompt;
-});
-
-// Copy prompt
-document.getElementById("copyBtn").addEventListener("click", () => {
-    let text = document.getElementById("promptOutput");
-    text.select();
-    navigator.clipboard.writeText(text.value);
-    alert("Prompt copied!");
-});
-
-/* -----------------------------------------
-   Runway Image Drag & Drop + LocalStorage 저장
--------------------------------------------- */
-
-// 이미지 저장 키
-const STORAGE_KEY = "runwayImages";
-
-// DOM elements
-let dropzone = document.getElementById("dropzone");
-let gallery = document.getElementById("gallery");
-
-/* ---------- 1) 페이지 로드 시 저장된 이미지 복원 ---------- */
-window.addEventListener("DOMContentLoaded", () => {
-    let savedImages = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
-
-    savedImages.forEach(src => {
-        addImageToGallery(src);
+    options.querySelectorAll(".option").forEach(opt => {
+        opt.addEventListener("click", () => {
+            selected.textContent = opt.textContent;
+            drop.classList.remove("open");
+        });
     });
 });
 
-/* ---------- 2) 드래그 오버 시 배경 강조 ---------- */
+document.addEventListener("click", (e) => {
+    document.querySelectorAll(".dropdown").forEach(drop => {
+        if (!drop.contains(e.target)) drop.classList.remove("open");
+    });
+});
+
+
+/* ----------------------------------------
+   GENERATE PROMPT
+-----------------------------------------*/
+
+document.getElementById("generateBtn").addEventListener("click", () => {
+
+    const mood = document.querySelector('[data-type="mood"] .dropdown-selected').textContent.trim();
+    const pattern = document.querySelector('[data-type="pattern"] .dropdown-selected').textContent.trim();
+
+    const c1 = document.getElementById("color1").value;
+    const c2 = document.getElementById("color2").value;
+    const c3 = document.getElementById("color3").value;
+
+    const output = document.getElementById("promptOutput");
+
+output.value =
+`High-fashion editorial concept featuring:
+- Mood: ${mood}
+- Textile: ${pattern}
+- Color palette: ${c1}, ${c2}, ${c3}
+- Image format: square 1:1 250px, centered, crisp edges.
+Generate the image inside a perfect square frame (1:1 aspect ratio).  
+Do not crop the model. Keep the head-to-toe framing within the square.  
+
+Full-body model with clearly visible face, natural proportions, photographed mid-stride on the runway.
+
+High-resolution garment texture, natural folds, true-to-life fabric movement.
+Sharp lens focus, shallow depth of field, cinematic contrast.
+No surreal effects, no fantasy elements, realistic proportions, authentic human skin texture.
+
+Shot on DSLR camera, 85mm lens, ISO 800, shutter 1/250, backstage color grading.
+Editorial detail, clean shadows, runway floor reflections.`;
+});
+
+
+
+
+/* ----------------------------------------
+   COPY & OPEN GEMINI
+-----------------------------------------*/
+
+document.getElementById("copyBtn").addEventListener("click", () => {
+    const text = document.getElementById("promptOutput");
+    text.select();
+    document.execCommand("copy");
+
+    window.open(
+        "https://gemini.google.com/app?hl=ko-KR",
+        "_blank"
+    );
+});
+
+
+/* ----------------------------------------
+   DRAG & DROP IMAGE PREVIEW
+-----------------------------------------*/
+
+const dropzone = document.getElementById("dropzone");
+const gallery = document.getElementById("gallery");
+
 dropzone.addEventListener("dragover", (e) => {
     e.preventDefault();
-    dropzone.style.background = "#efefef";
+    dropzone.style.background = "#f0f0f0";
 });
 
-/* ---------- 3) 드래그가 떠났을 때 ---------- */
 dropzone.addEventListener("dragleave", () => {
-    dropzone.style.background = "transparent";
+    dropzone.style.background = "white";
 });
 
-/* ---------- 4) 드롭하면 이미지 저장 + 표시 ---------- */
 dropzone.addEventListener("drop", (e) => {
     e.preventDefault();
-    dropzone.style.background = "transparent";
+    dropzone.style.background = "white";
 
-    let files = e.dataTransfer.files;
+    const files = e.dataTransfer.files;
 
-    for (let file of files) {
-        let reader = new FileReader();
-        reader.onload = (event) => {
-            let imgSource = event.target.result;
+    Array.from(files).forEach(file => {
+        if (!file.type.startsWith("image/")) return;
 
-            // 1) 갤러리에 추가
-            addImageToGallery(imgSource);
-
-            // 2) LocalStorage에 추가
-            saveImageToLocalStorage(imgSource);
+        const reader = new FileReader();
+        reader.onload = () => {
+            const img = document.createElement("img");
+            img.src = reader.result;
+            gallery.appendChild(img);
         };
         reader.readAsDataURL(file);
-    }
+    });
 });
-
-/* ---------- Helper: 갤러리에 이미지 추가 ---------- */
-function addImageToGallery(src) {
-    let img = document.createElement("img");
-    img.src = src;
-    img.className = "gallery-img";
-    gallery.appendChild(img);
-}
-
-/* ---------- Helper: LocalStorage에 이미지 저장 ---------- */
-function saveImageToLocalStorage(src) {
-    let savedImages = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
-    savedImages.push(src);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedImages));
-}

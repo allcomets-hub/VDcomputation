@@ -1,0 +1,254 @@
+/* reset .img from landing */
+.img { display: none !important; }
+
+/* global */
+body.prompt-page {
+    margin: 0;
+    background: #ffffff;
+    font-family: "IBM Plex Mono", monospace;
+    overflow-x: hidden;
+}
+
+/* WRAPPER --------------------------------------------------------- */
+.content-wrapper {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 40px; /* 좌우 여백 통일 */
+}
+
+/* red dots */
+/* 🔥 Prompt 페이지에서도 dots가 화면 전체에 반복 표시되도록 */
+.dots::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+
+    background-image:
+        radial-gradient(circle, rgba(255,0,0,1) 60%, transparent 61%),
+        radial-gradient(circle, rgba(255,0,0,1) 60%, transparent 61%),
+        radial-gradient(circle, rgba(255,0,0,1) 60%, transparent 61%),
+        radial-gradient(circle, rgba(255,0,0,1) 60%, transparent 61%),
+        radial-gradient(circle, rgba(255,0,0,1) 60%, transparent 61%);
+
+    background-size: 32px 32px, 40px 40px, 50px 50px, 28px 28px, 22px 22px;
+
+    /* 🔥 핵심 — 반복되도록! */
+    background-repeat: no-repeat;
+
+    /* 🔥 랜덤 같은 배치 효과 */
+    background-position:
+        10% 12%,
+        80% 30%,
+        55% 75%,
+        20% 88%,
+        90% 55%;
+
+    opacity: 0.75;
+    z-index: 5;
+    pointer-events: none;
+}
+
+
+/* collage */
+.collage {
+    position: relative;
+    height: 48vh;
+    overflow: visible;
+      z-index: 1;
+}
+
+.lab-img {
+    position: absolute;
+    object-fit: cover;
+    opacity: 0.72;
+    z-index: 0;   /* ALWAYS BEHIND */
+    mix-blend-mode: multiply;
+}
+
+
+.content-wrapper {
+    position: relative;
+    z-index: 10;
+}
+
+.generate-btn, .copy-btn {
+    font-family: "IBM Plex Mono", monospace;
+}
+
+.img19 { top: 32%; left: 5%; width: 38%; }
+.img28 { top: -20%; right: 5%; width: 40%; mix-blend-mode: screen; }
+.img29 { bottom: -30%; left: 35%; width: 34%; mix-blend-mode: overlay; }
+
+/* title */
+.title-block {
+    position: absolute;
+    top: 10%;
+    left: 6%;
+    z-index: 20;
+}
+
+.main-title {
+    font-size: 3.4rem;
+    margin: 0;
+}
+
+
+/* PANEL --------------------------------------------------------- */
+.panel {
+    width: 100%;
+    margin-top: 40px;
+
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 30px;
+
+    position: relative;
+    z-index: 20;
+}
+
+.panel-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* COLOR INPUTS */
+.colors {
+    display: flex;
+    gap: 12px;
+}
+
+.colors input[type="color"] {
+    appearance: none;
+    border: 1px solid #000;
+    width: 110px;
+    height: 48px;
+    padding: 0;
+    border-radius: 0;
+    cursor: pointer;
+}
+
+.colors input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.colors input[type="color"]::-webkit-color-swatch {
+    border: none;
+}
+
+/* DROPDOWN (MOOD / PATTERN) */
+.dropdown {
+    width: 100%;
+    position: relative;
+    user-select: none;
+}
+
+.dropdown-selected {
+    height: 25px;
+    border: 1px solid #000;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+}
+
+.dropdown-options {
+    display: none;
+    position: absolute;
+    top: 52px;
+    width: 100%;
+    background: white;
+    border: 1px solid #000;
+    z-index: 10;
+}
+
+.dropdown.open .dropdown-options {
+    display: block;
+}
+
+.option {
+    padding: 12px 16px;
+    border-bottom: 1px solid #000;
+    cursor: pointer;
+}
+
+.option:last-child {
+    border-bottom: none;
+}
+
+.option:hover {
+    background: #000;
+    color: #fff;
+}
+
+
+/* BUTTON --------------------------------------------------------- */
+.generate-btn,
+.copy-btn {
+    font-family: "IBM Plex Mono", monospace;  /* 🔥 글씨체 통일 */
+    font-size: 0.9rem;
+    padding: 12px 20px;
+    border: 1px solid black;
+    background: white;
+    cursor: pointer;
+}
+
+
+/* OUTPUT --------------------------------------------------------- */
+.output {
+    width: 100%;
+    margin-top: 40px;
+}
+
+.output textarea {
+    width: 100%;
+    height: 160px;
+    margin-top: 8px;
+}
+
+/* DROPZONE --------------------------------------------------------- */
+.dropzone-area {
+    width: 100%;
+    margin-top: 40px;
+}
+
+.dropzone {
+    width: 100%;
+    height: 180px;
+    border: 2px dashed black;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.gallery {
+    margin-top: 20px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+
+.gallery img {
+    width: 250px;
+    height: 250px;
+    object-fit: cover;     /* 🔥 여백 없이 꽉 차게 */
+    object-position: center; /* 중앙 기준으로 잘리게 */
+    border-radius: 4px;
+}
+
+.saved-prompts {
+    width: calc(100% - 80px);
+    margin: 40px auto;
+    padding: 20px;
+    border: 1px solid #000;
+    font-family: "IBM Plex Mono", monospace;
+}
+
+.saved-prompt {
+    padding: 10px 0;
+    border-bottom: 1px dotted #aaa;
+    white-space: pre-line;
+}
